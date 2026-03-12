@@ -10,7 +10,6 @@ import { AvatarPicker } from "../components/avatar-picker";
 import { PasswordInput } from "../components/password-input";
 import { SocialAuthModal } from "../components/social-auth-modal";
 import { validateEmail, validatePassword } from "../lib/validation";
-import { saveUserAvatar } from "../lib/avatars";
 import { apiClient } from "../lib/api-client";
 import { UserProfile } from "../types";
 
@@ -109,7 +108,6 @@ export default function SettingsPage() {
     }
     const result = await updateProfile({ name: name.trim(), email, bio, avatarUrl: avatarUrl || undefined });
     if (result.success) {
-      if (user) saveUserAvatar(user.id, avatarUrl);
       showToast("Profile updated", "success");
     } else {
       setProfileError(result.error || "Failed to update profile");

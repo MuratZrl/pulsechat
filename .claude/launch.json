@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "require('child_process').execSync('npx next dev',{stdio:'inherit'})"],
+      "port": 3000,
+      "cwd": "apps/web"
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "require('child_process').execSync('npx nest start --watch',{stdio:'inherit'})"],
+      "port": 3001,
+      "cwd": "apps/api"
+    }
+  ]
+}
