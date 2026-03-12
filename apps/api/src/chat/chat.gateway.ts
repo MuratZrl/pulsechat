@@ -215,6 +215,24 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('mark_read')
+  async handleMarkRead(
+    @ConnectedSocket() client: AuthSocket,
+    @MessageBody() data: { messageId: string; roomId: string },
+  ) {
+    await this.prisma.readReceipt.upsert({
+      where: { messageId_userId: { messageId: data.messageId, userId: client.userId } },
+      create: { messageId: data.messageId, userId: client.userId },
+      update: { readAt: new Date() },
+    });
+    this.server.to(data.roomId).emit('read_receipt', {
+      messageId: data.messageId,
+      userId: client.userId,
+      userName: client.userName,
+      readAt: new Date().toISOString(),
+    });
+  }
+
   @SubscribeMessage('typing_start')
   handleTypingStart(
     @ConnectedSocket() client: AuthSocket,

@@ -28,6 +28,7 @@ model User {
   pins         Pin[]
   stars        Star[]
   invites      RoomInvite[]
+  readReceipts ReadReceipt[]
 }
 
 model Room {
@@ -85,8 +86,9 @@ model Message {
   replies    Message[]         @relation("MessageReplies")
   reactions  MessageReaction[]
   mentions   Mention[]
-  pins     Pin[]
-  stars    Star[]
+  pins         Pin[]
+  stars        Star[]
+  readReceipts ReadReceipt[]
 
   @@index([roomId, createdAt])
 }
@@ -137,6 +139,17 @@ model Star {
   message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+model ReadReceipt {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
 }

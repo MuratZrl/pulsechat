@@ -257,6 +257,28 @@ export class MessagesService {
     });
   }
 
+  async getReceipts(
+    messageIds: string[],
+  ): Promise<Record<string, { userId: string; userName: string; readAt: string }[]>> {
+    if (!messageIds.length) return {};
+
+    const receipts = await this.prisma.readReceipt.findMany({
+      where: { messageId: { in: messageIds } },
+      include: { user: { select: { id: true, name: true } } },
+    });
+
+    const result: Record<string, { userId: string; userName: string; readAt: string }[]> = {};
+    for (const r of receipts) {
+      if (!result[r.messageId]) result[r.messageId] = [];
+      result[r.messageId].push({
+        userId: r.userId,
+        userName: r.user.name,
+        readAt: r.readAt.toISOString(),
+      });
+    }
+    return result;
+  }
+
   async searchMessages(roomId: string, userId: string, query: string, limit = 20) {
     const member = await this.prisma.roomMember.findUnique({
       where: { userId_roomId: { userId, roomId } },

@@ -109,4 +109,12 @@ export class MessagesController {
   ) {
     return this.messagesService.markMentionsRead(req.user.id, roomId);
   }
+
+  @Get('rooms/:roomId/receipts')
+  getReceipts(
+    @Query('ids') ids: string,
+  ) {
+    const messageIds = ids ? ids.split(',').filter(Boolean) : [];
+    return this.messagesService.getReceipts(messageIds);
+  }
 }

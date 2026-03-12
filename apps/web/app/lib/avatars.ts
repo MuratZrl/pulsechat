@@ -1,4 +1,4 @@
-const USERS_KEY = "chat_users";
+// Preset avatar generator (SVG data URIs — no backend needed)
 
 export interface PresetAvatar {
   id: string;
@@ -26,23 +26,3 @@ export const PRESET_AVATARS: PresetAvatar[] = [
   { id: "alien", label: "Alien", url: makeAvatar("👽", "#34d399") },
   { id: "ghost", label: "Ghost", url: makeAvatar("👻", "#e879f9") },
 ];
-
-export function getUserAvatar(userId: string): string | null {
-  if (typeof window === "undefined") return null;
-  const stored = localStorage.getItem(USERS_KEY);
-  if (!stored) return null;
-  const users = JSON.parse(stored);
-  const user = users.find((u: { id: string }) => u.id === userId);
-  return user?.avatarUrl || null;
-}
-
-export function saveUserAvatar(userId: string, avatarUrl: string | null) {
-  if (typeof window === "undefined") return;
-  const stored = localStorage.getItem(USERS_KEY);
-  if (!stored) return;
-  const users = JSON.parse(stored);
-  const idx = users.findIndex((u: { id: string }) => u.id === userId);
-  if (idx === -1) return;
-  users[idx].avatarUrl = avatarUrl;
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}

@@ -67,7 +67,10 @@
       "Bash(cmd //c \"cd /d C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat\\\\apps\\\\web\\\\app\\\\lib && findstr /l /i \"\"localStorage\"\" pins.ts starred-messages.ts room-categories.ts user-profiles.ts read-receipts.ts room-invites.ts avatars.ts\")",
       "Bash(cmd //c \"del C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat\\\\apps\\\\web\\\\app\\\\lib\\\\pins.ts C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat\\\\apps\\\\web\\\\app\\\\lib\\\\starred-messages.ts C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat\\\\apps\\\\web\\\\app\\\\lib\\\\user-profiles.ts C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat\\\\apps\\\\web\\\\app\\\\lib\\\\room-invites.ts\")",
       "Bash(cmd //c \"cd /d C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat\\\\apps\\\\web && npx tsc --noEmit 2>&1\")",
-      "Bash(cmd //c \"cd /d C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat && git add -A && git commit -F .git\\\\COMMIT_MSG_TEMP\")"
+      "Bash(cmd //c \"cd /d C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat && git add -A && git commit -F .git\\\\COMMIT_MSG_TEMP\")",
+      "Bash(cmd //c \"del C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat\\\\apps\\\\web\\\\app\\\\lib\\\\mock-data.ts\")",
+      "Bash(cmd //c \"cd /d C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat\\\\apps\\\\api && npx prisma db push --accept-data-loss 2>&1\")",
+      "Bash(cmd //c \"cd /d C:\\\\Users\\\\mrtzr\\\\Projects\\\\realtime-chat && git add -A && git status\")"
     ]
   }
 }

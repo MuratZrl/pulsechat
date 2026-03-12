@@ -2,11 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, use } from "react";
 import { Message, Attachment, Reactions } from "../../types";
-import {
-  markAsRead,
-  getReadReceiptsForMessages,
-  ReadReceipt,
-} from "../../lib/read-receipts";
+import { ReadReceipt } from "../../lib/read-receipts";
 import { useAuth } from "../../contexts/auth-context";
 import { apiClient } from "../../lib/api-client";
 import { useSocket } from "../../hooks/useSocket";
@@ -95,7 +91,6 @@ export default function ChatRoomPage({
   const [readReceipts, setReadReceipts] = useState<
     Record<string, ReadReceipt[]>
   >({});
-  const scheduledReadsRef = useRef<Set<string>>(new Set());
 
   // Drag & drop
   const [isDragging, setIsDragging] = useState(false);
@@ -271,6 +266,25 @@ export default function ChatRoomPage({
       );
     };
 
+    const onReadReceipt = (payload: {
+      messageId: string;
+      userId: string;
+      userName: string;
+      readAt: string;
+    }) => {
+      setReadReceipts((prev) => {
+        const existing = prev[payload.messageId] || [];
+        if (existing.some((r) => r.userId === payload.userId)) return prev;
+        return {
+          ...prev,
+          [payload.messageId]: [
+            ...existing,
+            { userId: payload.userId, userName: payload.userName, readAt: payload.readAt },
+          ],
+        };
+      });
+    };
+
     socket.on("new_message", onNewMessage);
     socket.on("message_edited", onMessageEdited);
     socket.on("message_deleted", onMessageDeleted);
@@ -278,6 +292,7 @@ export default function ChatRoomPage({
     socket.on("user_stop_typing", onUserStopTyping);
     socket.on("room_users", onRoomUsers);
     socket.on("reaction_updated", onReactionUpdated);
+    socket.on("read_receipt", onReadReceipt);
 
     return () => {
       socket.off("new_message", onNewMessage);
@@ -287,40 +302,32 @@ export default function ChatRoomPage({
       socket.off("user_stop_typing", onUserStopTyping);
       socket.off("room_users", onRoomUsers);
       socket.off("reaction_updated", onReactionUpdated);
+      socket.off("read_receipt", onReadReceipt);
       socket.emit("leave_room", { roomId });
     };
   }, [socket, roomId, user]);
 
-  // Load read receipts
+  // Load read receipts from API whenever the message list changes
   useEffect(() => {
     const ids = messages.map((m) => m.id);
-    setReadReceipts(getReadReceiptsForMessages(ids));
-  }, [messages]);
+    if (!ids.length) return;
+    apiClient
+      .get<Record<string, ReadReceipt[]>>(
+        `/rooms/${roomId}/receipts?ids=${ids.join(",")}`
+      )
+      .then(setReadReceipts)
+      .catch(() => {});
+  }, [messages, roomId]);
 
-  // --- Read receipt simulation (local, visual only) ---
+  // Emit mark_read for every message from others as soon as we see them
   useEffect(() => {
-    if (!user) return;
-    const myMessages = messages.filter((m) => m.senderId === user.id);
-    const others = onlineUsers.filter(
-      (u) => u.id !== user.id && u.status === "online"
-    );
-
-    myMessages.forEach((msg) => {
-      others.forEach((other) => {
-        const key = `${msg.id}:${other.id}`;
-        if (scheduledReadsRef.current.has(key)) return;
-        const existing = readReceipts[msg.id] || [];
-        if (existing.some((r) => r.userId === other.id)) return;
-
-        scheduledReadsRef.current.add(key);
-        const delay = 1000 + Math.random() * 3000;
-        setTimeout(() => {
-          const updated = markAsRead(msg.id, other.id, other.name);
-          setReadReceipts((prev) => ({ ...prev, [msg.id]: updated }));
-        }, delay);
-      });
+    if (!socket || !user) return;
+    messages.forEach((msg) => {
+      if (msg.senderId !== user.id) {
+        socket.emit("mark_read", { messageId: msg.id, roomId });
+      }
     });
-  }, [messages, onlineUsers, user]);
+  }, [messages, socket, user, roomId]);
 
   // --- Search debounce (uses server-side API) ---
   useEffect(() => {
