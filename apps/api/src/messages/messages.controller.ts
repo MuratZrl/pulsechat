@@ -1,0 +1,63 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
+import { MessagesService } from './messages.service';
+import { CreateMessageDto } from './dto/create-message.dto';
+import { EditMessageDto } from './dto/edit-message.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
+@UseGuards(JwtAuthGuard)
+@Controller()
+export class MessagesController {
+  constructor(private messagesService: MessagesService) {}
+
+  @Get('rooms/:roomId/messages')
+  getMessages(
+    @Request() req: { user: { id: string } },
+    @Param('roomId') roomId: string,
+    @Query('limit') limit?: string,
+    @Query('before') before?: string,
+  ) {
+    return this.messagesService.getMessages(
+      roomId,
+      req.user.id,
+      limit ? parseInt(limit) : 30,
+      before,
+    );
+  }
+
+  @Post('rooms/:roomId/messages')
+  sendMessage(
+    @Request() req: { user: { id: string; name: string } },
+    @Param('roomId') roomId: string,
+    @Body() dto: CreateMessageDto,
+  ) {
+    return this.messagesService.sendMessage(roomId, req.user.id, dto, req.user.name);
+  }
+
+  @Patch('messages/:id')
+  editMessage(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+    @Body() dto: EditMessageDto,
+  ) {
+    return this.messagesService.editMessage(id, req.user.id, dto);
+  }
+
+  @Delete('messages/:id')
+  deleteMessage(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.messagesService.deleteMessage(id, req.user.id);
+  }
+}

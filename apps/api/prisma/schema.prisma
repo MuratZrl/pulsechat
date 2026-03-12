@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  name         String
+  email        String       @unique
+  passwordHash String
+  bio          String       @default("")
+  avatarUrl    String?
+  createdAt    DateTime     @default(now())
+  rooms        RoomMember[]
+  messages     Message[]
+  createdRooms Room[]       @relation("RoomCreator")
+}
+
+model Room {
+  id          String       @id @default(cuid())
+  name        String
+  createdById String
+  createdBy   User         @relation("RoomCreator", fields: [createdById], references: [id])
+  createdAt   DateTime     @default(now())
+  members     RoomMember[]
+  messages    Message[]
+}
+
+model RoomMember {
+  userId   String
+  roomId   String
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roomId])
+}
+
+model Message {
+  id         String    @id @default(cuid())
+  roomId     String
+  senderId   String
+  text       String    @default("")
+  createdAt  DateTime  @default(now())
+  editedAt   DateTime?
+  isDeleted  Boolean   @default(false)
+  replyToId  String?
+  attachment Json?
+  forwarded  Json?
+  room       Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender     User      @relation(fields: [senderId], references: [id])
+  replyTo    Message?  @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies    Message[] @relation("MessageReplies")
+
+  @@index([roomId, createdAt])
+}
