@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, use } from "react";
 import { Message, Attachment, Reactions } from "../../types";
-import { getPinnedMessageIds, togglePin } from "../../lib/pins";
 import {
   markAsRead,
   getReadReceiptsForMessages,
@@ -25,10 +24,6 @@ import { playNotificationSound } from "../../lib/sounds";
 import { ForwardMessageModal } from "../../components/forward-message-modal";
 import { StarredMessagesPanel } from "../../components/starred-messages-panel";
 import { useToast } from "../../components/toast";
-import {
-  getStarredMessageIds,
-  toggleStarred as toggleStarredMsg,
-} from "../../lib/starred-messages";
 import { canInvite } from "../../lib/room-roles";
 import { InviteLinkModal } from "../../components/invite-link-modal";
 import { KeyboardShortcutsModal } from "../../components/keyboard-shortcuts-modal";
@@ -143,9 +138,6 @@ export default function ChatRoomPage({
 
   // --- Init: fetch messages + room name from API ---
   useEffect(() => {
-    setPinnedIds(getPinnedMessageIds(roomId));
-    setStarredIds(getStarredMessageIds());
-
     // Fetch initial messages
     apiClient
       .get<PaginatedMessages>(`/rooms/${roomId}/messages?limit=30`)
@@ -163,6 +155,18 @@ export default function ChatRoomPage({
         setRoomType(room.type ?? "CHANNEL");
       })
       .catch(() => setRoomName("Unknown Room"));
+
+    // Load pinned IDs from API
+    apiClient
+      .get<string[]>(`/rooms/${roomId}/pins`)
+      .then(setPinnedIds)
+      .catch(() => {});
+
+    // Load starred IDs from API
+    apiClient
+      .get<{ messageId: string }[]>(`/stars`)
+      .then((entries) => setStarredIds(entries.map((e) => e.messageId)))
+      .catch(() => {});
   }, [roomId]);
 
   // --- Socket event listeners ---
@@ -311,7 +315,7 @@ export default function ChatRoomPage({
     });
   }, [messages, onlineUsers, user]);
 
-  // --- Search debounce ---
+  // --- Search debounce (uses server-side API) ---
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
 
@@ -321,23 +325,35 @@ export default function ChatRoomPage({
       return;
     }
 
-    searchDebounceRef.current = setTimeout(() => {
-      const q = searchQuery.toLowerCase();
-      const results = messages.filter(
-        (m) => !m.isDeleted && m.text.toLowerCase().includes(q)
-      );
-      setSearchResultIds(results.map((m) => m.id));
-      setActiveSearchIndex(0);
-      if (results.length > 0) {
-        setScrollToMessageId(results[0].id);
-        setTimeout(() => setScrollToMessageId(null), 100);
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const results = await apiClient.get<Message[]>(
+          `/rooms/${roomId}/messages/search?q=${encodeURIComponent(searchQuery.trim())}&limit=20`
+        );
+        // Merge any new messages (not yet in memory) into the message list
+        setMessages((prev) => {
+          const idSet = new Set(prev.map((m) => m.id));
+          const newMsgs = results.filter((m) => !idSet.has(m.id));
+          if (newMsgs.length === 0) return prev;
+          return [...prev, ...newMsgs].sort(
+            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+        });
+        setSearchResultIds(results.map((m) => m.id));
+        setActiveSearchIndex(0);
+        if (results.length > 0) {
+          setScrollToMessageId(results[0].id);
+          setTimeout(() => setScrollToMessageId(null), 100);
+        }
+      } catch (e) {
+        console.error("Search failed:", e);
       }
-    }, 200);
+    }, 400);
 
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
-  }, [searchQuery, messages]);
+  }, [searchQuery, roomId]);
 
   // --- Keyboard shortcuts ---
   useEffect(() => {
@@ -454,8 +470,10 @@ export default function ChatRoomPage({
 
   const handlePin = useCallback(
     (messageId: string) => {
-      const updated = togglePin(roomId, messageId);
-      setPinnedIds(updated);
+      apiClient
+        .post<string[]>(`/rooms/${roomId}/messages/${messageId}/pin`)
+        .then(setPinnedIds)
+        .catch(console.error);
     },
     [roomId]
   );
@@ -556,11 +574,19 @@ export default function ChatRoomPage({
   // Star
   const handleToggleStar = useCallback(
     (messageId: string) => {
-      const isNowStarred = toggleStarredMsg(messageId, roomId);
-      setStarredIds(getStarredMessageIds());
-      showToast(isNowStarred ? "Message starred" : "Message unstarred", "info");
+      apiClient
+        .post<{ starred: boolean }>(`/messages/${messageId}/star`)
+        .then(({ starred }) => {
+          // Refresh star list from API to stay in sync
+          apiClient
+            .get<{ messageId: string }[]>(`/stars`)
+            .then((entries) => setStarredIds(entries.map((e) => e.messageId)))
+            .catch(() => {});
+          showToast(starred ? "Message starred" : "Message unstarred", "info");
+        })
+        .catch(console.error);
     },
-    [roomId, showToast]
+    [showToast]
   );
 
   // Forward — send a copy to the target room via socket
@@ -806,6 +832,7 @@ export default function ChatRoomPage({
           onForward={handleForward}
           onStar={handleToggleStar}
           starredIds={starredIds}
+          pinnedIds={pinnedIds}
           onToggleReaction={handleToggleReaction}
         />
 
@@ -817,6 +844,7 @@ export default function ChatRoomPage({
           onSend={handleSend}
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
+          roomId={roomId}
         />
 
         {/* Drag & drop overlay */}

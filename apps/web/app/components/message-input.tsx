@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, FormEvent } from "react";
+import { useState, useRef, useEffect, FormEvent } from "react";
 import { Message, Attachment } from "../types";
 import { EmojiPicker } from "./emoji-picker";
 import { AttachmentPicker } from "./attachment-picker";
@@ -8,14 +8,28 @@ import { GifPicker } from "./gif-picker";
 import { VoiceRecorder } from "./voice-recorder";
 import { ReplyPreviewBar } from "./reply-preview";
 import { MockGif } from "../lib/mock-gifs";
+import { apiClient } from "../lib/api-client";
+
+interface RoomUser {
+  id: string;
+  name: string;
+}
 
 interface MessageInputProps {
   onSend: (text: string, options?: { replyToId?: string; attachment?: Attachment }) => void;
   replyingTo?: Message | null;
   onCancelReply?: () => void;
+  roomId?: string;
 }
 
-export function MessageInput({ onSend, replyingTo, onCancelReply }: MessageInputProps) {
+/** Returns the partial word after @ at the cursor, or null */
+function getMentionPrefix(value: string, cursorPos: number): string | null {
+  const before = value.slice(0, cursorPos);
+  const match = before.match(/@(\w*)$/);
+  return match ? match[1] : null;
+}
+
+export function MessageInput({ onSend, replyingTo, onCancelReply, roomId }: MessageInputProps) {
   const [text, setText] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
   const [showAttachment, setShowAttachment] = useState(false);
@@ -23,6 +37,23 @@ export function MessageInput({ onSend, replyingTo, onCancelReply }: MessageInput
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState<Attachment | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // @mention autocomplete
+  const [allUsers, setAllUsers] = useState<RoomUser[]>([]);
+  const [mentionPrefix, setMentionPrefix] = useState<string | null>(null);
+  const [mentionHighlight, setMentionHighlight] = useState(0);
+
+  // Load users once for @mention
+  useEffect(() => {
+    apiClient.get<RoomUser[]>("/rooms/users/list").then(setAllUsers).catch(() => {});
+  }, []);
+
+  const filteredUsers =
+    mentionPrefix !== null
+      ? allUsers
+          .filter((u) => u.name.toLowerCase().startsWith(mentionPrefix.toLowerCase()))
+          .slice(0, 6)
+      : [];
 
   function closeAllPickers() {
     setShowEmoji(false);
@@ -40,6 +71,63 @@ export function MessageInput({ onSend, replyingTo, onCancelReply }: MessageInput
       });
       setText("");
       setPendingAttachment(null);
+      setMentionPrefix(null);
+    }
+  }
+
+  function handleTextChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    setText(val);
+    const cursor = e.target.selectionStart ?? val.length;
+    const prefix = getMentionPrefix(val, cursor);
+    setMentionPrefix(prefix);
+    setMentionHighlight(0);
+  }
+
+  /** Replace the partial @word with the selected user's @name */
+  function insertMention(user: RoomUser) {
+    const cursor = inputRef.current?.selectionStart ?? text.length;
+    const before = text.slice(0, cursor);
+    const after = text.slice(cursor);
+    const replaced = before.replace(/@(\w*)$/, `@${user.name} `);
+    const newText = replaced + after;
+    setText(newText);
+    setMentionPrefix(null);
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        const pos = replaced.length;
+        inputRef.current.setSelectionRange(pos, pos);
+      }
+    }, 0);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (mentionPrefix !== null && filteredUsers.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionHighlight((h) => (h + 1) % filteredUsers.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionHighlight((h) => (h - 1 + filteredUsers.length) % filteredUsers.length);
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        insertMention(filteredUsers[mentionHighlight] ?? filteredUsers[0]);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        insertMention(filteredUsers[mentionHighlight] ?? filteredUsers[0]);
+        return;
+      }
+      if (e.key === "Escape") {
+        setMentionPrefix(null);
+        return;
+      }
     }
   }
 
@@ -127,6 +215,38 @@ export function MessageInput({ onSend, replyingTo, onCancelReply }: MessageInput
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
           </button>
+        </div>
+      )}
+
+      {/* @mention dropdown */}
+      {mentionPrefix !== null && filteredUsers.length > 0 && (
+        <div className="border-t border-border bg-sidebar">
+          <p className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
+            Mention a user
+          </p>
+          <ul className="pb-1">
+            {filteredUsers.map((u, i) => (
+              <li key={u.id}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // prevent input blur
+                    insertMention(u);
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors ${
+                    i === mentionHighlight
+                      ? "bg-active text-text-primary"
+                      : "text-text-secondary hover:bg-hover hover:text-text-primary"
+                  }`}
+                >
+                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-[10px] font-bold text-indigo-400">
+                    {u.name[0]?.toUpperCase() ?? "?"}
+                  </span>
+                  <span>{u.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -225,7 +345,8 @@ export function MessageInput({ onSend, replyingTo, onCancelReply }: MessageInput
           ref={inputRef}
           type="text"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={handleTextChange}
+          onKeyDown={handleKeyDown}
           placeholder="Type a message..."
           className="flex-1 rounded-md border border-border bg-input px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         />

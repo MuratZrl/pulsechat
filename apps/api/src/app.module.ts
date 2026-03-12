@@ -7,6 +7,7 @@ import { RoomsModule } from './rooms/rooms.module';
 import { MessagesModule } from './messages/messages.module';
 import { ChatModule } from './chat/chat.module';
 import { UploadModule } from './upload/upload.module';
+import { PinsStarsModule } from './pins-stars/pins-stars.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { UploadModule } from './upload/upload.module';
     MessagesModule,
     ChatModule,
     UploadModule,
+    PinsStarsModule,
   ],
 })
 export class AppModule {}

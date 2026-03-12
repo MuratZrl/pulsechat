@@ -1,9 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
-import { Message } from "../types";
-import { getStarredEntries } from "../lib/starred-messages";
-import { getMessageById, getRooms } from "../lib/mock-data";
+import { useState, useEffect } from "react";
+import { apiClient } from "../lib/api-client";
+
+interface StarredEntry {
+  messageId: string;
+  roomId: string;
+  roomName: string;
+  starredAt: string;
+  message: {
+    id: string;
+    text: string;
+    senderName: string;
+  };
+}
 
 interface StarredMessagesPanelProps {
   onUnstar: (messageId: string) => void;
@@ -16,30 +26,22 @@ export function StarredMessagesPanel({
   onJumpTo,
   onClose,
 }: StarredMessagesPanelProps) {
-  const starredData = useMemo(() => {
-    const entries = getStarredEntries();
-    const rooms = getRooms();
-    const roomMap: Record<string, string> = {};
-    rooms.forEach((r) => (roomMap[r.id] = r.name));
+  const [entries, setEntries] = useState<StarredEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
-    return entries
-      .map((entry) => {
-        const msg = getMessageById(entry.messageId);
-        if (!msg || msg.isDeleted) return null;
-        return {
-          ...entry,
-          message: msg,
-          roomName: roomMap[entry.roomId] || "Unknown",
-        };
-      })
-      .filter(Boolean) as Array<{
-        messageId: string;
-        roomId: string;
-        starredAt: string;
-        message: Message;
-        roomName: string;
-      }>;
+  useEffect(() => {
+    apiClient
+      .get<StarredEntry[]>("/stars")
+      .then(setEntries)
+      .catch(() => setEntries([]))
+      .finally(() => setLoading(false));
   }, []);
+
+  function handleUnstar(messageId: string) {
+    // Optimistically remove from list
+    setEntries((prev) => prev.filter((e) => e.messageId !== messageId));
+    onUnstar(messageId);
+  }
 
   return (
     <div className="flex w-72 flex-col border-l border-border bg-sidebar">
@@ -60,7 +62,14 @@ export function StarredMessagesPanel({
 
       {/* Starred messages list */}
       <div className="flex-1 overflow-y-auto scrollbar-hidden">
-        {starredData.length === 0 ? (
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <svg className="h-5 w-5 animate-spin text-text-secondary" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+        ) : entries.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2 text-text-secondary">
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
@@ -71,7 +80,7 @@ export function StarredMessagesPanel({
             </p>
           </div>
         ) : (
-          starredData.map((item) => (
+          entries.map((item) => (
             <div
               key={item.messageId}
               className="border-b border-border px-4 py-3 hover:bg-hover/50"
@@ -91,7 +100,7 @@ export function StarredMessagesPanel({
                     </svg>
                   </button>
                   <button
-                    onClick={() => onUnstar(item.messageId)}
+                    onClick={() => handleUnstar(item.messageId)}
                     className="rounded p-0.5 text-yellow-400 hover:bg-hover"
                     title="Unstar"
                   >

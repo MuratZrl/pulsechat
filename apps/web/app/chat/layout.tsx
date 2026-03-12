@@ -11,6 +11,7 @@ import { ThemeToggle } from "../components/theme-toggle";
 import { SoundToggle } from "../components/sound-toggle";
 import { LogoutDialog } from "../components/logout-dialog";
 import { useTabNotifications } from "../lib/tab-notifications";
+import { usePushNotifications } from "../hooks/usePushNotifications";
 
 export default function ChatLayout({
   children,
@@ -27,6 +28,7 @@ export default function ChatLayout({
   const [totalUnread, setTotalUnread] = useState(0);
 
   useTabNotifications(totalUnread);
+  usePushNotifications();
 
   const handleUnreadChange = useCallback((total: number) => {
     setTotalUnread(total);

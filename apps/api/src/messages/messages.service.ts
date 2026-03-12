@@ -256,4 +256,24 @@ export class MessagesService {
       data: { read: true },
     });
   }
+
+  async searchMessages(roomId: string, userId: string, query: string, limit = 20) {
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+
+    const messages = await this.prisma.message.findMany({
+      where: {
+        roomId,
+        isDeleted: false,
+        text: { contains: query, mode: 'insensitive' },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: this.messageInclude,
+    });
+
+    return messages.map((m) => this.formatMessage(m));
+  }
 }

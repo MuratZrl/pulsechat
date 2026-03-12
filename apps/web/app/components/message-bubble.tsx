@@ -7,7 +7,6 @@ import { ReactionBar } from "./reaction-bar";
 import { MessageActions } from "./message-actions";
 import { ReplyQuote } from "./reply-preview";
 import { AttachmentCard } from "./attachment-card";
-import { isPinned } from "../lib/pins";
 import { FormattedText } from "./formatted-text";
 import { ReadReceiptIndicator, ReadReceipt } from "./read-receipt-indicator";
 import { VoicePlayer } from "./voice-player";
@@ -34,6 +33,7 @@ interface MessageBubbleProps {
   onForward?: () => void;
   onStar?: () => void;
   isStarred?: boolean;
+  isPinnedMsg?: boolean;
 }
 
 export function MessageBubble({
@@ -54,6 +54,7 @@ export function MessageBubble({
   onForward,
   onStar,
   isStarred,
+  isPinnedMsg,
 }: MessageBubbleProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(message.text);
@@ -75,7 +76,7 @@ export function MessageBubble({
     second: "2-digit",
   });
 
-  const pinned = isPinned(roomId, message.id);
+  const pinned = isPinnedMsg ?? false;
 
   const handleToggleReaction = useCallback(
     (emoji: string) => {

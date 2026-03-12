@@ -26,6 +26,22 @@ class ToggleReactionDto {
 export class MessagesController {
   constructor(private messagesService: MessagesService) {}
 
+  @Get('rooms/:roomId/messages/search')
+  searchMessages(
+    @Request() req: { user: { id: string } },
+    @Param('roomId') roomId: string,
+    @Query('q') q: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!q?.trim()) return [];
+    return this.messagesService.searchMessages(
+      roomId,
+      req.user.id,
+      q.trim(),
+      limit ? parseInt(limit) : 20,
+    );
+  }
+
   @Get('rooms/:roomId/messages')
   getMessages(
     @Request() req: { user: { id: string } },

@@ -27,6 +27,7 @@ interface MessageListProps {
   onStar?: (messageId: string) => void;
   starredIds?: string[];
   onToggleReaction?: (messageId: string, emoji: string) => void;
+  pinnedIds?: string[];
 }
 
 function getDateKey(dateStr: string): string {
@@ -55,6 +56,7 @@ export function MessageList({
   onStar,
   starredIds,
   onToggleReaction,
+  pinnedIds,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -173,6 +175,7 @@ export function MessageList({
                 onForward={onForward ? () => onForward(msg) : undefined}
                 onStar={onStar ? () => onStar(msg.id) : undefined}
                 isStarred={starredIds?.includes(msg.id)}
+                isPinnedMsg={pinnedIds?.includes(msg.id)}
                 onToggleReaction={onToggleReaction}
               />
             </div>

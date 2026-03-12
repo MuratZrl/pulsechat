@@ -5,6 +5,7 @@ import { Attachment } from "../types";
 import { getAccessToken } from "../lib/api-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+const SERVER_ORIGIN = API_BASE.replace(/\/api$/, "");
 
 interface AttachmentPickerProps {
   onSelect: (attachment: Attachment) => void;
@@ -64,7 +65,7 @@ export function AttachmentPicker({ onSelect, onClose }: AttachmentPickerProps) {
         name: data.name,
         type: data.type,
         size: data.size,
-        url: data.url,
+        url: data.url.startsWith("http") ? data.url : `${SERVER_ORIGIN}${data.url}`,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");

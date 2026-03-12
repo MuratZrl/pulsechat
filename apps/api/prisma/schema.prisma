@@ -25,6 +25,8 @@ model User {
   createdRooms Room[]            @relation("RoomCreator")
   reactions    MessageReaction[]
   mentions     Mention[]
+  pins     Pin[]
+  stars    Star[]
 }
 
 model Room {
@@ -36,6 +38,8 @@ model Room {
   createdAt   DateTime     @default(now())
   members     RoomMember[]
   messages    Message[]
+  pins     Pin[]
+  stars    Star[]
 }
 
 model RoomMember {
@@ -67,6 +71,8 @@ model Message {
   replies    Message[]         @relation("MessageReplies")
   reactions  MessageReaction[]
   mentions   Mention[]
+  pins     Pin[]
+  stars    Star[]
 
   @@index([roomId, createdAt])
 }
@@ -91,6 +97,32 @@ model Mention {
   createdAt DateTime @default(now())
   message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+model Pin {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  roomId    String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+model Star {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  roomId    String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
 }
