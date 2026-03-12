@@ -69,14 +69,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       for (const { roomId } of memberships) {
         await client.join(roomId);
-        // Notify room of user coming online
         client.to(roomId).emit('user_online', {
           userId: user.id,
           userName: user.name,
         });
       }
 
-      // Send updated room users list to the socket
       for (const { roomId } of memberships) {
         await this.emitRoomUsers(roomId);
       }
@@ -129,8 +127,24 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         dto,
         client.userName,
       );
-      // Broadcast to all room members (including sender)
       this.server.to(roomId).emit('new_message', message);
+
+      // Notify mentioned users
+      if (message.reactions !== undefined) {
+        const mentions = await this.prisma.mention.findMany({
+          where: { messageId: message.id },
+          select: { userId: true },
+        });
+        for (const { userId } of mentions) {
+          this.server.to(userId).emit('mention', {
+            roomId,
+            messageId: message.id,
+            fromName: client.userName,
+            text: message.text,
+          });
+        }
+      }
+
       return { success: true, message };
     } catch (e: unknown) {
       throw new WsException(e instanceof Error ? e.message : 'Unknown error');
@@ -172,6 +186,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       this.server.to(deleted.roomId).emit('message_deleted', {
         messageId: deleted.id,
+      });
+      return { success: true };
+    } catch (e: unknown) {
+      throw new WsException(e instanceof Error ? e.message : 'Unknown error');
+    }
+  }
+
+  @SubscribeMessage('toggle_reaction')
+  async handleToggleReaction(
+    @ConnectedSocket() client: AuthSocket,
+    @MessageBody() data: { messageId: string; emoji: string },
+  ) {
+    try {
+      const result = await this.messagesService.toggleReaction(
+        data.messageId,
+        client.userId,
+        data.emoji,
+      );
+      // Broadcast updated reactions to everyone in the room
+      this.server.to(result.roomId).emit('reaction_updated', {
+        messageId: result.messageId,
+        reactions: result.reactions,
       });
       return { success: true };
     } catch (e: unknown) {

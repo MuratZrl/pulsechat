@@ -1,14 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Message } from "../types";
+import { Message, Reactions } from "../types";
 import { Avatar } from "./avatar";
 import { ReactionBar } from "./reaction-bar";
 import { MessageActions } from "./message-actions";
 import { ReplyQuote } from "./reply-preview";
 import { AttachmentCard } from "./attachment-card";
-import { getReactions, toggleReaction, Reactions } from "../lib/reactions";
-import { getMessageById } from "../lib/mock-data";
 import { isPinned } from "../lib/pins";
 import { FormattedText } from "./formatted-text";
 import { ReadReceiptIndicator, ReadReceipt } from "./read-receipt-indicator";
@@ -28,6 +26,7 @@ interface MessageBubbleProps {
   onReply: (message: Message) => void;
   onPin: (messageId: string) => void;
   onAvatarClick: (e: React.MouseEvent, userId: string, userName: string) => void;
+  onToggleReaction?: (messageId: string, emoji: string) => void;
   searchQuery?: string;
   readReceipts?: ReadReceipt[];
   replyCount?: number;
@@ -47,6 +46,7 @@ export function MessageBubble({
   onReply,
   onPin,
   onAvatarClick,
+  onToggleReaction,
   searchQuery,
   readReceipts,
   replyCount,
@@ -55,11 +55,10 @@ export function MessageBubble({
   onStar,
   isStarred,
 }: MessageBubbleProps) {
-  const [reactions, setReactions] = useState<Reactions>(() =>
-    getReactions(message.id)
-  );
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(message.text);
+
+  const reactions: Reactions = message.reactions ?? {};
 
   const createdDate = new Date(message.createdAt);
   const time = createdDate.toLocaleTimeString([], {
@@ -80,10 +79,9 @@ export function MessageBubble({
 
   const handleToggleReaction = useCallback(
     (emoji: string) => {
-      const updated = toggleReaction(message.id, emoji, currentUserId);
-      setReactions({ ...updated });
+      onToggleReaction?.(message.id, emoji);
     },
-    [message.id, currentUserId]
+    [message.id, onToggleReaction]
   );
 
   const handleSaveEdit = () => {
@@ -114,11 +112,6 @@ export function MessageBubble({
       </div>
     );
   }
-
-  // Reply lookup
-  const replyOriginal = message.replyToId
-    ? getMessageById(message.replyToId) || null
-    : null;
 
   return (
     <div
@@ -170,8 +163,8 @@ export function MessageBubble({
             </p>
           )}
 
-          {/* Reply quote */}
-          {message.replyToId && <ReplyQuote originalMessage={replyOriginal} />}
+          {/* Reply quote — uses server-provided replyTo preview */}
+          {message.replyToId && <ReplyQuote replyTo={message.replyTo ?? null} />}
 
           {/* Message text or edit mode */}
           {isEditing ? (
@@ -214,11 +207,9 @@ export function MessageBubble({
               className="mt-1 flex h-24 w-40 items-center justify-center rounded-md text-3xl"
               style={{ backgroundColor: message.attachment.url || "#6366f1" }}
             >
-              {message.text.includes("Reactions") || message.attachment.name?.includes("Thumbs") || message.attachment.name?.includes("Clapping") || message.attachment.name?.includes("Mind") || message.attachment.name?.includes("Shocked") || message.attachment.name?.includes("Eye")
-                ? "👋"
-                : message.attachment.name?.includes("Heart") || message.attachment.name?.includes("Love") || message.attachment.name?.includes("Hug") || message.attachment.name?.includes("Kiss")
+              {message.attachment.name?.includes("Heart") || message.attachment.name?.includes("Love")
                 ? "❤️"
-                : message.attachment.name?.includes("Party") || message.attachment.name?.includes("Confetti") || message.attachment.name?.includes("Fireworks") || message.attachment.name?.includes("Dance") || message.attachment.name?.includes("Cheers")
+                : message.attachment.name?.includes("Party") || message.attachment.name?.includes("Confetti")
                 ? "🎉"
                 : "😂"}
             </div>

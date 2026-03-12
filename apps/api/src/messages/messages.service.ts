@@ -7,9 +7,22 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 
+type ReactionMap = Record<string, string[]>; // emoji -> userIds
+
 @Injectable()
 export class MessagesService {
   constructor(private prisma: PrismaService) {}
+
+  private buildReactionMap(
+    reactions: { emoji: string; userId: string }[],
+  ): ReactionMap {
+    const map: ReactionMap = {};
+    for (const r of reactions) {
+      if (!map[r.emoji]) map[r.emoji] = [];
+      map[r.emoji].push(r.userId);
+    }
+    return map;
+  }
 
   private formatMessage(msg: {
     id: string;
@@ -23,6 +36,13 @@ export class MessagesService {
     attachment: unknown;
     forwarded: unknown;
     sender: { id: string; name: string };
+    reactions?: { emoji: string; userId: string }[];
+    replyTo?: {
+      id: string;
+      text: string;
+      isDeleted: boolean;
+      sender: { name: string };
+    } | null;
   }) {
     return {
       id: msg.id,
@@ -34,10 +54,31 @@ export class MessagesService {
       editedAt: msg.editedAt?.toISOString(),
       isDeleted: msg.isDeleted,
       replyToId: msg.replyToId ?? undefined,
+      replyTo: msg.replyTo
+        ? {
+            id: msg.replyTo.id,
+            text: msg.replyTo.isDeleted ? '' : msg.replyTo.text,
+            senderName: msg.replyTo.sender.name,
+          }
+        : undefined,
       attachment: msg.attachment ?? undefined,
       forwarded: msg.forwarded ?? undefined,
+      reactions: this.buildReactionMap(msg.reactions ?? []),
     };
   }
+
+  private readonly messageInclude = {
+    sender: { select: { id: true, name: true } },
+    reactions: { select: { emoji: true, userId: true } },
+    replyTo: {
+      select: {
+        id: true,
+        text: true,
+        isDeleted: true,
+        sender: { select: { name: true } },
+      },
+    },
+  };
 
   async getMessages(
     roomId: string,
@@ -45,7 +86,6 @@ export class MessagesService {
     limit = 30,
     before?: string,
   ) {
-    // Verify member
     const member = await this.prisma.roomMember.findUnique({
       where: { userId_roomId: { userId, roomId } },
     });
@@ -59,7 +99,7 @@ export class MessagesService {
       },
       orderBy: { createdAt: 'desc' },
       take,
-      include: { sender: { select: { id: true, name: true } } },
+      include: this.messageInclude,
     });
 
     const hasMore = messages.length > limit;
@@ -91,8 +131,30 @@ export class MessagesService {
         attachment: dto.attachment ? (dto.attachment as object) : undefined,
         forwarded: dto.forwarded ? (dto.forwarded as object) : undefined,
       },
-      include: { sender: { select: { id: true, name: true } } },
+      include: this.messageInclude,
     });
+
+    // Parse @mentions and store them
+    const mentionPattern = /@(\w[\w ]*?\w|\w+)/g;
+    const mentionedNames = [...dto.text.matchAll(mentionPattern)].map((m) =>
+      m[1].toLowerCase(),
+    );
+    if (mentionedNames.length > 0) {
+      const users = await this.prisma.user.findMany({
+        where: {
+          name: { in: mentionedNames, mode: 'insensitive' },
+          id: { not: userId },
+          rooms: { some: { roomId } },
+        },
+        select: { id: true },
+      });
+      if (users.length > 0) {
+        await this.prisma.mention.createMany({
+          data: users.map((u) => ({ messageId: message.id, userId: u.id })),
+          skipDuplicates: true,
+        });
+      }
+    }
 
     return this.formatMessage(message);
   }
@@ -109,7 +171,7 @@ export class MessagesService {
     const updated = await this.prisma.message.update({
       where: { id: messageId },
       data: { text: dto.text, editedAt: new Date() },
-      include: { sender: { select: { id: true, name: true } } },
+      include: this.messageInclude,
     });
 
     return this.formatMessage(updated);
@@ -133,9 +195,65 @@ export class MessagesService {
     const updated = await this.prisma.message.update({
       where: { id: messageId },
       data: { isDeleted: true, text: '' },
-      include: { sender: { select: { id: true, name: true } } },
+      include: this.messageInclude,
     });
 
     return this.formatMessage(updated);
+  }
+
+  async toggleReaction(messageId: string, userId: string, emoji: string) {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { roomId: true },
+    });
+    if (!message) throw new NotFoundException('Message not found');
+
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId: message.roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+
+    const existing = await this.prisma.messageReaction.findUnique({
+      where: { messageId_userId_emoji: { messageId, userId, emoji } },
+    });
+
+    if (existing) {
+      await this.prisma.messageReaction.delete({ where: { id: existing.id } });
+    } else {
+      await this.prisma.messageReaction.create({
+        data: { messageId, userId, emoji },
+      });
+    }
+
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+      select: { emoji: true, userId: true },
+    });
+
+    return {
+      messageId,
+      roomId: message.roomId,
+      reactions: this.buildReactionMap(reactions),
+    };
+  }
+
+  async getUnreadMentions(userId: string) {
+    return this.prisma.mention.findMany({
+      where: { userId, read: false },
+      include: {
+        message: {
+          select: { id: true, roomId: true, text: true, createdAt: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+
+  async markMentionsRead(userId: string, roomId: string) {
+    await this.prisma.mention.updateMany({
+      where: { userId, read: false, message: { roomId } },
+      data: { read: true },
+    });
   }
 }

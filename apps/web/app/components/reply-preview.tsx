@@ -1,4 +1,4 @@
-import { Message } from "../types";
+import { Message, ReplyPreview } from "../types";
 import { FormattedText } from "./formatted-text";
 
 interface ReplyPreviewBarProps {
@@ -33,11 +33,11 @@ export function ReplyPreviewBar({ replyingTo, onCancel }: ReplyPreviewBarProps) 
 }
 
 interface ReplyQuoteProps {
-  originalMessage: Message | null;
+  replyTo?: ReplyPreview | null;
 }
 
-export function ReplyQuote({ originalMessage }: ReplyQuoteProps) {
-  if (!originalMessage) {
+export function ReplyQuote({ replyTo }: ReplyQuoteProps) {
+  if (!replyTo) {
     return (
       <div className="mb-1 border-l-2 border-text-secondary pl-2">
         <p className="text-xs italic text-text-secondary">Original message was deleted</p>
@@ -45,17 +45,16 @@ export function ReplyQuote({ originalMessage }: ReplyQuoteProps) {
     );
   }
 
-  const snippet =
-    originalMessage.isDeleted
-      ? "This message was deleted"
-      : originalMessage.text.length > 50
-        ? originalMessage.text.slice(0, 50) + "..."
-        : originalMessage.text;
+  const snippet = !replyTo.text
+    ? "This message was deleted"
+    : replyTo.text.length > 50
+      ? replyTo.text.slice(0, 50) + "..."
+      : replyTo.text;
 
   return (
     <div className="mb-1 border-l-2 border-indigo-400 pl-2">
       <p className="text-[10px] font-medium text-indigo-400">
-        {originalMessage.senderName}
+        {replyTo.senderName}
       </p>
       <FormattedText text={snippet} className="text-xs text-text-secondary" />
     </div>

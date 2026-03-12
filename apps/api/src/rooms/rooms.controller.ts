@@ -53,4 +53,27 @@ export class RoomsController {
   ) {
     return this.roomsService.leaveRoom(id, req.user.id);
   }
+
+  @Post(':id/read')
+  markRead(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.roomsService.markRead(id, req.user.id);
+  }
+
+  // ─── Direct Messages ─────────────────────────────────────────────────────
+
+  @Post('dm/:userId')
+  getOrCreateDm(
+    @Request() req: { user: { id: string } },
+    @Param('userId') userId: string,
+  ) {
+    return this.roomsService.getOrCreateDm(req.user.id, userId);
+  }
+
+  @Get('users/list')
+  getUsers(@Request() req: { user: { id: string } }) {
+    return this.roomsService.getUsers(req.user.id);
+  }
 }

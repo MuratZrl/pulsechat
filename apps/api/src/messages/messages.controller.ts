@@ -14,6 +14,12 @@ import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { IsString } from 'class-validator';
+
+class ToggleReactionDto {
+  @IsString()
+  emoji: string;
+}
 
 @UseGuards(JwtAuthGuard)
 @Controller()
@@ -41,7 +47,12 @@ export class MessagesController {
     @Param('roomId') roomId: string,
     @Body() dto: CreateMessageDto,
   ) {
-    return this.messagesService.sendMessage(roomId, req.user.id, dto, req.user.name);
+    return this.messagesService.sendMessage(
+      roomId,
+      req.user.id,
+      dto,
+      req.user.name,
+    );
   }
 
   @Patch('messages/:id')
@@ -59,5 +70,27 @@ export class MessagesController {
     @Param('id') id: string,
   ) {
     return this.messagesService.deleteMessage(id, req.user.id);
+  }
+
+  @Post('messages/:id/reactions')
+  toggleReaction(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+    @Body() dto: ToggleReactionDto,
+  ) {
+    return this.messagesService.toggleReaction(id, req.user.id, dto.emoji);
+  }
+
+  @Get('mentions')
+  getUnreadMentions(@Request() req: { user: { id: string } }) {
+    return this.messagesService.getUnreadMentions(req.user.id);
+  }
+
+  @Post('rooms/:roomId/mentions/read')
+  markMentionsRead(
+    @Request() req: { user: { id: string } },
+    @Param('roomId') roomId: string,
+  ) {
+    return this.messagesService.markMentionsRead(req.user.id, roomId);
   }
 }

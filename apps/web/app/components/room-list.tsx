@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Room } from "../types";
-import { getUnreadCount, setLastRead } from "../lib/unread";
 import { useAuth } from "../contexts/auth-context";
 import { apiClient } from "../lib/api-client";
+import { useSocket } from "../hooks/useSocket";
 import { CreateRoomModal } from "./create-room-modal";
 import {
   getRoomCategory,
@@ -20,75 +20,134 @@ interface RoomListProps {
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
+interface AppUser {
+  id: string;
+  name: string;
+  avatarUrl?: string | null;
+}
+
 export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomListProps) {
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [showModal, setShowModal] = useState(false);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [categoryMenu, setCategoryMenu] = useState<{
-    roomId: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  const [categoryMenu, setCategoryMenu] = useState<{ roomId: string; x: number; y: number } | null>(null);
+  const [showDmList, setShowDmList] = useState(false);
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [userSearch, setUserSearch] = useState("");
   const pathname = usePathname();
   const { user } = useAuth();
+  const { socket } = useSocket();
   const localSearchRef = useRef<HTMLInputElement>(null);
   const inputRef = searchInputRef || localSearchRef;
 
-  useEffect(() => {
+  // Load rooms from API
+  const loadRooms = useCallback(() => {
     apiClient.get<Room[]>("/rooms").then(setRooms).catch(console.error);
   }, []);
 
-  // Compute unread counts and mark active room as read
   useEffect(() => {
-    const counts: Record<string, number> = {};
-    for (const room of rooms) {
-      counts[room.id] = getUnreadCount(room.id);
+    loadRooms();
+  }, [loadRooms]);
+
+  // Mark active room as read when navigating
+  useEffect(() => {
+    const activeRoom = rooms.find((r) => pathname === `/chat/${r.id}`);
+    if (!activeRoom) return;
+    if ((activeRoom.unreadCount ?? 0) > 0 || (activeRoom.mentionCount ?? 0) > 0) {
+      apiClient.post(`/rooms/${activeRoom.id}/read`, {}).catch(console.error);
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === activeRoom.id ? { ...r, unreadCount: 0, mentionCount: 0 } : r
+        )
+      );
     }
+  }, [pathname, rooms]);
 
-    const activeRoomId = rooms.find((r) => pathname === `/chat/${r.id}`)?.id;
-    if (activeRoomId) {
-      setLastRead(activeRoomId, new Date().toISOString());
-      counts[activeRoomId] = 0;
-    }
+  // Real-time: increment unread count when a new message arrives in another room
+  useEffect(() => {
+    if (!socket || !user) return;
 
-    setUnreadCounts(counts);
+    const onNewMessage = (msg: { roomId: string; senderId: string }) => {
+      const activeRoomId = pathname.startsWith("/chat/")
+        ? pathname.replace("/chat/", "")
+        : null;
 
-    const total = Object.values(counts).reduce((sum, c) => sum + c, 0);
+      // Don't increment for the currently viewed room or own messages
+      if (msg.roomId === activeRoomId) return;
+      if (msg.senderId === user.id) return;
+
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === msg.roomId
+            ? { ...r, unreadCount: (r.unreadCount ?? 0) + 1 }
+            : r
+        )
+      );
+    };
+
+    const onMention = (payload: { roomId: string }) => {
+      const activeRoomId = pathname.startsWith("/chat/")
+        ? pathname.replace("/chat/", "")
+        : null;
+      if (payload.roomId === activeRoomId) return;
+
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === payload.roomId
+            ? { ...r, mentionCount: (r.mentionCount ?? 0) + 1 }
+            : r
+        )
+      );
+    };
+
+    socket.on("new_message", onNewMessage);
+    socket.on("mention", onMention);
+    return () => {
+      socket.off("new_message", onNewMessage);
+      socket.off("mention", onMention);
+    };
+  }, [socket, user, pathname]);
+
+  // Propagate total unread count up
+  useEffect(() => {
+    const total = rooms.reduce((sum, r) => sum + (r.unreadCount ?? 0), 0);
     onUnreadChange?.(total);
-  }, [rooms, pathname, onUnreadChange]);
+  }, [rooms, onUnreadChange]);
 
-  const filteredRooms = search
-    ? rooms.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()))
-    : rooms;
+  const channels = useMemo(
+    () => rooms.filter((r) => r.type !== "DM"),
+    [rooms]
+  );
+  const dms = useMemo(
+    () => rooms.filter((r) => r.type === "DM"),
+    [rooms]
+  );
 
-  // Group rooms by category
-  const groupedRooms = useMemo(() => {
+  const filteredChannels = search
+    ? channels.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()))
+    : channels;
+
+  const filteredDms = search
+    ? dms.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()))
+    : dms;
+
+  // Group channels by category
+  const groupedChannels = useMemo(() => {
     const groups: Record<string, Room[]> = {};
     const categories = getCategories();
-
-    for (const room of filteredRooms) {
+    for (const room of filteredChannels) {
       const cat = getRoomCategory(room.id);
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push(room);
     }
-
-    // Sort categories to match default order
     const ordered: [string, Room[]][] = [];
     for (const cat of categories) {
-      if (groups[cat]) {
-        ordered.push([cat, groups[cat]]);
-        delete groups[cat];
-      }
+      if (groups[cat]) { ordered.push([cat, groups[cat]]); delete groups[cat]; }
     }
-    // Any remaining categories
-    for (const [cat, rooms] of Object.entries(groups)) {
-      ordered.push([cat, rooms]);
-    }
-
+    for (const [cat, r] of Object.entries(groups)) ordered.push([cat, r]);
     return ordered;
-  }, [filteredRooms]);
+  }, [filteredChannels]);
 
   async function handleCreateRoom(name: string) {
     if (!user) return;
@@ -99,6 +158,32 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
       console.error("Failed to create room:", e);
     }
     setShowModal(false);
+  }
+
+  async function handleOpenDmList() {
+    setShowDmList(true);
+    try {
+      const list = await apiClient.get<AppUser[]>("/rooms/users/list");
+      setUsers(list);
+    } catch (e) {
+      console.error("Failed to load users:", e);
+    }
+  }
+
+  async function handleStartDm(targetUserId: string) {
+    try {
+      const dm = await apiClient.post<{ id: string; name: string; type: string; isNew: boolean }>(
+        `/rooms/dm/${targetUserId}`, {}
+      );
+      setShowDmList(false);
+      setUserSearch("");
+      // Add/refresh DM room in list
+      loadRooms();
+      // Navigate to DM
+      window.location.href = `/chat/${dm.id}`;
+    } catch (e) {
+      console.error("Failed to start DM:", e);
+    }
   }
 
   function toggleCollapsed(cat: string) {
@@ -113,8 +198,48 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
   function handleCategoryChange(roomId: string, category: string) {
     setRoomCategory(roomId, category);
     setCategoryMenu(null);
-    // Force re-render
     setRooms([...rooms]);
+  }
+
+  const filteredUsers = userSearch
+    ? users.filter((u) => u.name.toLowerCase().includes(userSearch.toLowerCase()))
+    : users;
+
+  function RoomLink({ room, prefix = "#" }: { room: Room; prefix?: string }) {
+    const isActive = pathname === `/chat/${room.id}`;
+    const unread = room.unreadCount ?? 0;
+    const mentions = room.mentionCount ?? 0;
+    return (
+      <Link
+        href={`/chat/${room.id}`}
+        onClick={onNavigate}
+        onContextMenu={prefix === "#" ? (e) => handleContextMenu(e, room.id) : undefined}
+        className={`flex items-center justify-between px-4 py-2 text-sm transition-colors ${
+          isActive
+            ? "bg-active font-medium text-text-primary"
+            : unread > 0
+            ? "font-semibold text-text-primary hover:bg-hover"
+            : "text-text-secondary hover:bg-hover hover:text-text-primary"
+        }`}
+      >
+        <span className="truncate">
+          <span className="mr-1.5 text-text-secondary">{prefix}</span>
+          {room.name}
+        </span>
+        <span className="flex items-center gap-1 shrink-0">
+          {mentions > 0 && !isActive && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-semibold text-white">
+              @{mentions}
+            </span>
+          )}
+          {unread > 0 && !isActive && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-semibold text-white">
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </span>
+      </Link>
+    );
   }
 
   return (
@@ -130,124 +255,70 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
             placeholder="Search rooms..."
             className="w-full rounded-md border border-border bg-input px-3 py-1.5 pl-8 text-sm text-text-primary placeholder:text-text-secondary focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
-          <svg
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
           </svg>
           {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
+            <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
             </button>
           )}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-hidden">
-        {filteredRooms.length === 0 && search && (
-          <p className="px-4 py-3 text-xs text-text-secondary">No rooms found</p>
-        )}
+        {/* Channels */}
+        {groupedChannels.map(([category, categoryRooms]) => (
+          <div key={category}>
+            <button
+              onClick={() => toggleCollapsed(category)}
+              className="flex w-full items-center gap-1 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-secondary hover:text-text-primary"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${collapsed[category] ? "" : "rotate-90"}`}>
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+              {category}
+              <span className="ml-auto text-[10px] font-normal">{categoryRooms.length}</span>
+            </button>
+            {!collapsed[category] && categoryRooms.map((room) => (
+              <RoomLink key={room.id} room={room} />
+            ))}
+          </div>
+        ))}
 
-        {/* If searching, show flat list */}
-        {search ? (
-          filteredRooms.map((room) => {
-            const isActive = pathname === `/chat/${room.id}`;
-            const unread = unreadCounts[room.id] || 0;
-            return (
-              <Link
-                key={room.id}
-                href={`/chat/${room.id}`}
-                onClick={onNavigate}
-                className={`flex items-center justify-between px-4 py-2.5 text-sm transition-colors ${
-                  isActive
-                    ? "bg-active font-medium text-text-primary"
-                    : "text-text-secondary hover:bg-hover hover:text-text-primary"
-                }`}
-              >
-                <span>
-                  <span className="mr-2 text-text-secondary">#</span>
-                  {room.name}
-                </span>
-                {unread > 0 && !isActive && (
-                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-semibold text-white">
-                    {unread}
-                  </span>
-                )}
-              </Link>
-            );
-          })
-        ) : (
-          /* Categorized view */
-          groupedRooms.map(([category, categoryRooms]) => (
-            <div key={category}>
-              {/* Category header */}
-              <button
-                onClick={() => toggleCollapsed(category)}
-                className="flex w-full items-center gap-1 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-secondary hover:text-text-primary"
-              >
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className={`transition-transform ${collapsed[category] ? "" : "rotate-90"}`}
-                >
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
-                {category}
-                <span className="ml-auto text-[10px] font-normal">
-                  {categoryRooms.length}
-                </span>
-              </button>
-
-              {/* Category rooms */}
-              {!collapsed[category] &&
-                categoryRooms.map((room) => {
-                  const isActive = pathname === `/chat/${room.id}`;
-                  const unread = unreadCounts[room.id] || 0;
-                  return (
-                    <Link
-                      key={room.id}
-                      href={`/chat/${room.id}`}
-                      onClick={onNavigate}
-                      onContextMenu={(e) => handleContextMenu(e, room.id)}
-                      className={`flex items-center justify-between px-4 py-2 text-sm transition-colors ${
-                        isActive
-                          ? "bg-active font-medium text-text-primary"
-                          : "text-text-secondary hover:bg-hover hover:text-text-primary"
-                      }`}
-                    >
-                      <span>
-                        <span className="mr-2 text-text-secondary">#</span>
-                        {room.name}
-                      </span>
-                      {unread > 0 && !isActive && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-semibold text-white">
-                          {unread}
-                        </span>
-                      )}
-                    </Link>
-                  );
-                })}
-            </div>
-          ))
-        )}
+        {/* Direct Messages section */}
+        <div>
+          <div className="flex w-full items-center gap-1 px-3 py-1.5">
+            <button
+              onClick={() => toggleCollapsed("__dms")}
+              className="flex flex-1 items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-text-secondary hover:text-text-primary"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${collapsed["__dms"] ? "" : "rotate-90"}`}>
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+              Direct Messages
+              {dms.length > 0 && <span className="ml-auto text-[10px] font-normal">{dms.length}</span>}
+            </button>
+            <button
+              onClick={handleOpenDmList}
+              title="New Direct Message"
+              className="ml-1 rounded p-0.5 text-text-secondary hover:bg-hover hover:text-text-primary"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+          {!collapsed["__dms"] && filteredDms.map((room) => (
+            <RoomLink key={room.id} room={room} prefix="@" />
+          ))}
+          {!collapsed["__dms"] && dms.length === 0 && (
+            <p className="px-4 py-1.5 text-xs text-text-secondary">
+              No DMs yet —{" "}
+              <button onClick={handleOpenDmList} className="text-indigo-400 hover:underline">start one</button>
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="border-t border-border p-3">
@@ -260,30 +331,17 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
       </div>
 
       {showModal && (
-        <CreateRoomModal
-          onClose={() => setShowModal(false)}
-          onCreate={handleCreateRoom}
-        />
+        <CreateRoomModal onClose={() => setShowModal(false)} onCreate={handleCreateRoom} />
       )}
 
       {/* Category context menu */}
       {categoryMenu && (
         <>
-          <div
-            className="fixed inset-0 z-50"
-            onClick={() => setCategoryMenu(null)}
-          />
-          <div
-            className="fixed z-50 w-36 rounded-md border border-border bg-sidebar py-1 shadow-xl"
-            style={{ left: categoryMenu.x, top: categoryMenu.y }}
-          >
-            <p className="px-3 py-1 text-[10px] font-semibold uppercase text-text-secondary">
-              Move to
-            </p>
+          <div className="fixed inset-0 z-50" onClick={() => setCategoryMenu(null)} />
+          <div className="fixed z-50 w-36 rounded-md border border-border bg-sidebar py-1 shadow-xl" style={{ left: categoryMenu.x, top: categoryMenu.y }}>
+            <p className="px-3 py-1 text-[10px] font-semibold uppercase text-text-secondary">Move to</p>
             {getCategories().map((cat) => (
-              <button
-                key={cat}
-                onClick={() => handleCategoryChange(categoryMenu.roomId, cat)}
+              <button key={cat} onClick={() => handleCategoryChange(categoryMenu.roomId, cat)}
                 className={`w-full px-3 py-1.5 text-left text-xs transition-colors ${
                   getRoomCategory(categoryMenu.roomId) === cat
                     ? "bg-indigo-600 text-white"
@@ -293,6 +351,41 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
                 {cat}
               </button>
             ))}
+          </div>
+        </>
+      )}
+
+      {/* DM user picker modal */}
+      {showDmList && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/50" onClick={() => { setShowDmList(false); setUserSearch(""); }} />
+          <div className="fixed left-1/2 top-1/3 z-50 w-72 -translate-x-1/2 rounded-lg border border-border bg-sidebar p-4 shadow-xl">
+            <h3 className="mb-3 text-sm font-semibold text-text-primary">New Direct Message</h3>
+            <input
+              type="text"
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              placeholder="Search users..."
+              autoFocus
+              className="mb-3 w-full rounded-md border border-border bg-input px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <div className="max-h-48 overflow-y-auto space-y-0.5">
+              {filteredUsers.length === 0 && (
+                <p className="py-2 text-center text-xs text-text-secondary">No users found</p>
+              )}
+              {filteredUsers.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => handleStartDm(u.id)}
+                  className="flex w-full items-center gap-2 rounded px-2 py-2 text-sm text-text-primary hover:bg-hover"
+                >
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">
+                    {u.name.slice(0, 2).toUpperCase()}
+                  </div>
+                  {u.name}
+                </button>
+              ))}
+            </div>
           </div>
         </>
       )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo, use } from "react";
-import { Message, Attachment } from "../../types";
+import { Message, Attachment, Reactions } from "../../types";
 import { getPinnedMessageIds, togglePin } from "../../lib/pins";
 import {
   markAsRead,
@@ -56,6 +56,7 @@ export default function ChatRoomPage({
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [roomName, setRoomName] = useState("");
+  const [roomType, setRoomType] = useState<"CHANNEL" | "DM">("CHANNEL");
   const [showMembers, setShowMembers] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
 
@@ -154,10 +155,13 @@ export default function ChatRoomPage({
       })
       .catch(console.error);
 
-    // Fetch room name
+    // Fetch room info
     apiClient
-      .get<{ id: string; name: string }>(`/rooms/${roomId}`)
-      .then((room) => setRoomName(room.name))
+      .get<{ id: string; name: string; type?: "CHANNEL" | "DM" }>(`/rooms/${roomId}`)
+      .then((room) => {
+        setRoomName(room.name);
+        setRoomType(room.type ?? "CHANNEL");
+      })
       .catch(() => setRoomName("Unknown Room"));
   }, [roomId]);
 
@@ -245,12 +249,24 @@ export default function ChatRoomPage({
       }
     };
 
+    const onReactionUpdated = (payload: {
+      messageId: string;
+      reactions: Reactions;
+    }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === payload.messageId ? { ...m, reactions: payload.reactions } : m
+        )
+      );
+    };
+
     socket.on("new_message", onNewMessage);
     socket.on("message_edited", onMessageEdited);
     socket.on("message_deleted", onMessageDeleted);
     socket.on("user_typing", onUserTyping);
     socket.on("user_stop_typing", onUserStopTyping);
     socket.on("room_users", onRoomUsers);
+    socket.on("reaction_updated", onReactionUpdated);
 
     return () => {
       socket.off("new_message", onNewMessage);
@@ -259,6 +275,7 @@ export default function ChatRoomPage({
       socket.off("user_typing", onUserTyping);
       socket.off("user_stop_typing", onUserStopTyping);
       socket.off("room_users", onRoomUsers);
+      socket.off("reaction_updated", onReactionUpdated);
       socket.emit("leave_room", { roomId });
     };
   }, [socket, roomId, user]);
@@ -419,6 +436,14 @@ export default function ChatRoomPage({
     (messageId: string) => {
       if (!socket) return;
       socket.emit("delete_message", { messageId });
+    },
+    [socket]
+  );
+
+  const handleToggleReaction = useCallback(
+    (messageId: string, emoji: string) => {
+      if (!socket) return;
+      socket.emit("toggle_reaction", { messageId, emoji });
     },
     [socket]
   );
@@ -597,7 +622,7 @@ export default function ChatRoomPage({
         {/* Room header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-text-primary">
-            <span className="mr-1 text-text-secondary">#</span>
+            <span className="mr-1 text-text-secondary">{roomType === "DM" ? "@" : "#"}</span>
             {roomName}
           </h2>
           <div className="flex items-center gap-1">
@@ -781,6 +806,7 @@ export default function ChatRoomPage({
           onForward={handleForward}
           onStar={handleToggleStar}
           starredIds={starredIds}
+          onToggleReaction={handleToggleReaction}
         />
 
         {/* Typing indicator */}

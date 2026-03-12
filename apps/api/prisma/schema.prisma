@@ -7,22 +7,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum RoomType {
+  CHANNEL
+  DM
+}
+
 model User {
-  id           String       @id @default(cuid())
+  id           String            @id @default(cuid())
   name         String
-  email        String       @unique
+  email        String            @unique
   passwordHash String
-  bio          String       @default("")
+  bio          String            @default("")
   avatarUrl    String?
-  createdAt    DateTime     @default(now())
+  createdAt    DateTime          @default(now())
   rooms        RoomMember[]
   messages     Message[]
-  createdRooms Room[]       @relation("RoomCreator")
+  createdRooms Room[]            @relation("RoomCreator")
+  reactions    MessageReaction[]
+  mentions     Mention[]
 }
 
 model Room {
   id          String       @id @default(cuid())
   name        String
+  type        RoomType     @default(CHANNEL)
   createdById String
   createdBy   User         @relation("RoomCreator", fields: [createdById], references: [id])
   createdAt   DateTime     @default(now())
@@ -31,31 +39,58 @@ model Room {
 }
 
 model RoomMember {
-  userId   String
-  roomId   String
-  role     String   @default("member")
-  joinedAt DateTime @default(now())
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId     String
+  roomId     String
+  role       String   @default("member")
+  joinedAt   DateTime @default(now())
+  lastReadAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@id([userId, roomId])
 }
 
 model Message {
-  id         String    @id @default(cuid())
+  id         String            @id @default(cuid())
   roomId     String
   senderId   String
-  text       String    @default("")
-  createdAt  DateTime  @default(now())
+  text       String            @default("")
+  createdAt  DateTime          @default(now())
   editedAt   DateTime?
-  isDeleted  Boolean   @default(false)
+  isDeleted  Boolean           @default(false)
   replyToId  String?
   attachment Json?
   forwarded  Json?
-  room       Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  sender     User      @relation(fields: [senderId], references: [id])
-  replyTo    Message?  @relation("MessageReplies", fields: [replyToId], references: [id])
-  replies    Message[] @relation("MessageReplies")
+  room       Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender     User              @relation(fields: [senderId], references: [id])
+  replyTo    Message?          @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies    Message[]         @relation("MessageReplies")
+  reactions  MessageReaction[]
+  mentions   Mention[]
 
   @@index([roomId, createdAt])
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+}
+
+model Mention {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
 }

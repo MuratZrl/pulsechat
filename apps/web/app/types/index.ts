@@ -7,8 +7,12 @@ export interface User {
 export interface Room {
   id: string;
   name: string;
+  type?: "CHANNEL" | "DM";
   createdBy: string;
   createdAt: string;
+  unreadCount?: number;
+  mentionCount?: number;
+  lastMessageAt?: string | null;
 }
 
 export interface Attachment {
@@ -18,6 +22,14 @@ export interface Attachment {
   url?: string;
   duration?: number;
 }
+
+export interface ReplyPreview {
+  id: string;
+  text: string;
+  senderName: string;
+}
+
+export type Reactions = Record<string, string[]>; // emoji -> userIds[]
 
 export interface Message {
   id: string;
@@ -29,11 +41,13 @@ export interface Message {
   editedAt?: string;
   isDeleted?: boolean;
   replyToId?: string;
+  replyTo?: ReplyPreview;
   attachment?: Attachment;
   forwarded?: {
     originalSender: string;
     originalRoom: string;
   };
+  reactions?: Reactions;
 }
 
 export interface UserProfile {

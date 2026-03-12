@@ -1,32 +1,15 @@
-import { getMessages } from "./mock-data";
+// Unread counts now come from the API (Room.unreadCount).
+// Marking a room as read calls POST /api/rooms/:id/read.
+// This file is kept as a no-op shim so existing imports don't break.
 
-const LAST_READ_KEY = "chat_last_read";
-
-function getLastReadMap(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  const stored = localStorage.getItem(LAST_READ_KEY);
-  return stored ? JSON.parse(stored) : {};
+export function getLastRead(_roomId: string): string | null {
+  return null;
 }
 
-function saveLastReadMap(map: Record<string, string>) {
-  localStorage.setItem(LAST_READ_KEY, JSON.stringify(map));
+export function setLastRead(_roomId: string, _timestamp: string) {
+  // no-op: handled server-side via POST /rooms/:id/read
 }
 
-export function getLastRead(roomId: string): string | null {
-  return getLastReadMap()[roomId] || null;
-}
-
-export function setLastRead(roomId: string, timestamp: string) {
-  const map = getLastReadMap();
-  map[roomId] = timestamp;
-  saveLastReadMap(map);
-}
-
-export function getUnreadCount(roomId: string): number {
-  const lastRead = getLastRead(roomId);
-  if (!lastRead) {
-    // Never visited — all messages are unread
-    return getMessages(roomId).length;
-  }
-  return getMessages(roomId).filter((m) => m.createdAt > lastRead).length;
+export function getUnreadCount(_roomId: string): number {
+  return 0; // real counts come from Room.unreadCount in the API response
 }
