@@ -198,4 +198,62 @@ export class RoomsService {
       orderBy: { name: 'asc' },
     });
   }
+
+  // ─── Invite Links ──────────────────────────────────────────────────────────
+
+  async getInvite(roomId: string, userId: string) {
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+
+    const invite = await this.prisma.roomInvite.findUnique({
+      where: { roomId },
+    });
+    return { code: invite?.code ?? null };
+  }
+
+  async generateInvite(roomId: string, userId: string) {
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+    if (member.role === 'member')
+      throw new ForbiddenException('Only admins and moderators can create invites');
+
+    // Delete existing, then create fresh invite
+    await this.prisma.roomInvite.deleteMany({ where: { roomId } });
+    const invite = await this.prisma.roomInvite.create({
+      data: { roomId, createdById: userId },
+    });
+    return { code: invite.code };
+  }
+
+  async revokeInvite(roomId: string, userId: string) {
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+    if (member.role === 'member')
+      throw new ForbiddenException('Only admins and moderators can revoke invites');
+
+    await this.prisma.roomInvite.deleteMany({ where: { roomId } });
+    return { success: true };
+  }
+
+  async joinByInvite(code: string, userId: string) {
+    const invite = await this.prisma.roomInvite.findUnique({
+      where: { code },
+      include: { room: { select: { id: true, name: true, type: true } } },
+    });
+    if (!invite) throw new NotFoundException('Invalid or expired invite code');
+
+    await this.prisma.roomMember.upsert({
+      where: { userId_roomId: { userId, roomId: invite.roomId } },
+      create: { userId, roomId: invite.roomId, role: 'member' },
+      update: {},
+    });
+
+    return { roomId: invite.roomId, roomName: invite.room.name, type: invite.room.type };
+  }
 }

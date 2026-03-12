@@ -1,37 +1,27 @@
+/**
+ * Room roles — in-memory cache (no localStorage).
+ * Populated by page.tsx when a room is loaded via getRoom() API.
+ * The API returns all members with their roles, so this cache is always fresh per room visit.
+ */
 export type RoomRole = "admin" | "moderator" | "member";
 
-const ROLES_KEY = "chat_room_roles";
+// roomId → (userId → role)
+const cache = new Map<string, Map<string, RoomRole>>();
 
-// Default: system rooms have user-mock-1 as admin
-const DEFAULT_ROLES: Record<string, Record<string, RoomRole>> = {
-  "room-1": { "user-mock-1": "admin", "user-mock-2": "moderator" },
-  "room-2": { "user-mock-1": "admin" },
-};
-
-function loadRoles(): Record<string, Record<string, RoomRole>> {
-  if (typeof window === "undefined") return DEFAULT_ROLES;
-  const stored = localStorage.getItem(ROLES_KEY);
-  return stored ? JSON.parse(stored) : DEFAULT_ROLES;
-}
-
-function saveRoles(roles: Record<string, Record<string, RoomRole>>) {
-  localStorage.setItem(ROLES_KEY, JSON.stringify(roles));
+/** Called by page.tsx after fetching room data from the API */
+export function setRoomRoles(
+  roomId: string,
+  members: { userId: string; role: string }[]
+): void {
+  const map = new Map<string, RoomRole>();
+  for (const m of members) {
+    map.set(m.userId, m.role as RoomRole);
+  }
+  cache.set(roomId, map);
 }
 
 export function getUserRole(roomId: string, userId: string): RoomRole {
-  const roles = loadRoles();
-  return roles[roomId]?.[userId] || "member";
-}
-
-export function setUserRole(
-  roomId: string,
-  userId: string,
-  role: RoomRole
-): void {
-  const roles = loadRoles();
-  if (!roles[roomId]) roles[roomId] = {};
-  roles[roomId][userId] = role;
-  saveRoles(roles);
+  return (cache.get(roomId)?.get(userId) ?? "member") as RoomRole;
 }
 
 export function canDeleteMessage(
@@ -58,9 +48,8 @@ export function canInvite(roomId: string, userId: string): boolean {
   return role === "admin" || role === "moderator";
 }
 
-export function getRoomRoles(
-  roomId: string
-): Record<string, RoomRole> {
-  const roles = loadRoles();
-  return roles[roomId] || {};
+export function getRoomRoles(roomId: string): Record<string, RoomRole> {
+  const map = cache.get(roomId);
+  if (!map) return {};
+  return Object.fromEntries(map.entries());
 }

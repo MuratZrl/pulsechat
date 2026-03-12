@@ -1,8 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { Message, Room } from "../types";
-import { getRooms } from "../lib/mock-data";
+import { useState, useEffect } from "react";
+import { Message } from "../types";
+import { apiClient } from "../lib/api-client";
+
+interface RoomItem {
+  id: string;
+  name: string;
+  type: string;
+}
 
 interface ForwardMessageModalProps {
   message: Message;
@@ -17,11 +23,18 @@ export function ForwardMessageModal({
   onForward,
   onClose,
 }: ForwardMessageModalProps) {
-  const [rooms] = useState<Room[]>(() =>
-    getRooms().filter((r) => r.id !== currentRoomId)
-  );
+  const [rooms, setRooms] = useState<RoomItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<RoomItem | null>(null);
+
+  useEffect(() => {
+    apiClient
+      .get<RoomItem[]>("/rooms")
+      .then((all) => setRooms(all.filter((r) => r.id !== currentRoomId)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [currentRoomId]);
 
   const filtered = search
     ? rooms.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()))
@@ -67,7 +80,14 @@ export function ForwardMessageModal({
 
         {/* Room list */}
         <div className="max-h-48 overflow-y-auto px-2 pb-2 scrollbar-hidden">
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="flex justify-center py-4">
+              <svg className="h-4 w-4 animate-spin text-text-secondary" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+          ) : filtered.length === 0 ? (
             <p className="px-2 py-3 text-center text-xs text-text-secondary">
               No other rooms available
             </p>
@@ -82,7 +102,9 @@ export function ForwardMessageModal({
                     : "text-text-secondary hover:bg-hover hover:text-text-primary"
                 }`}
               >
-                <span className="text-text-secondary">#</span>
+                <span className={selectedRoom?.id === room.id ? "text-indigo-200" : "text-text-secondary"}>
+                  {room.type === "DM" ? "@" : "#"}
+                </span>
                 {room.name}
               </button>
             ))

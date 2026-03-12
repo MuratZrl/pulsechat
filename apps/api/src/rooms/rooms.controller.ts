@@ -76,4 +76,38 @@ export class RoomsController {
   getUsers(@Request() req: { user: { id: string } }) {
     return this.roomsService.getUsers(req.user.id);
   }
+
+  // ─── Invite Links ─────────────────────────────────────────────────────────
+
+  @Get(':id/invite')
+  getInvite(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.roomsService.getInvite(id, req.user.id);
+  }
+
+  @Post(':id/invite')
+  generateInvite(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.roomsService.generateInvite(id, req.user.id);
+  }
+
+  @Delete(':id/invite')
+  revokeInvite(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.roomsService.revokeInvite(id, req.user.id);
+  }
+
+  @Post('invite/:code/join')
+  joinByInvite(
+    @Request() req: { user: { id: string } },
+    @Param('code') code: string,
+  ) {
+    return this.roomsService.joinByInvite(code, req.user.id);
+  }
 }

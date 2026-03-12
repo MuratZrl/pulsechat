@@ -2,8 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { resolveInviteCode } from "../../../lib/room-invites";
-import { getRooms } from "../../../lib/mock-data";
+import { apiClient } from "../../../lib/api-client";
 
 export default function JoinPage({
   params,
@@ -15,17 +14,12 @@ export default function JoinPage({
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    const roomId = resolveInviteCode(code);
-    if (roomId) {
-      // Verify room exists
-      const rooms = getRooms();
-      const room = rooms.find((r) => r.id === roomId);
-      if (room) {
-        router.replace(`/chat/${roomId}`);
-        return;
-      }
-    }
-    setError(true);
+    apiClient
+      .post<{ roomId: string; roomName: string; type: string }>(
+        `/rooms/invite/${code}/join`
+      )
+      .then(({ roomId }) => router.replace(`/chat/${roomId}`))
+      .catch(() => setError(true));
   }, [code, router]);
 
   if (error) {

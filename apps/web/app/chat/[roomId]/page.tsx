@@ -24,7 +24,7 @@ import { playNotificationSound } from "../../lib/sounds";
 import { ForwardMessageModal } from "../../components/forward-message-modal";
 import { StarredMessagesPanel } from "../../components/starred-messages-panel";
 import { useToast } from "../../components/toast";
-import { canInvite } from "../../lib/room-roles";
+import { canInvite, setRoomRoles } from "../../lib/room-roles";
 import { InviteLinkModal } from "../../components/invite-link-modal";
 import { KeyboardShortcutsModal } from "../../components/keyboard-shortcuts-modal";
 
@@ -149,10 +149,17 @@ export default function ChatRoomPage({
 
     // Fetch room info
     apiClient
-      .get<{ id: string; name: string; type?: "CHANNEL" | "DM" }>(`/rooms/${roomId}`)
+      .get<{
+        id: string;
+        name: string;
+        type?: "CHANNEL" | "DM";
+        members?: { userId: string; role: string }[];
+      }>(`/rooms/${roomId}`)
       .then((room) => {
         setRoomName(room.name);
         setRoomType(room.type ?? "CHANNEL");
+        // Populate in-memory role cache for badge rendering and canInvite checks
+        if (room.members) setRoomRoles(roomId, room.members);
       })
       .catch(() => setRoomName("Unknown Room"));
 

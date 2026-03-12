@@ -1,11 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import {
-  generateInviteCode,
-  getInviteCode,
-  revokeInviteCode,
-} from "../lib/room-invites";
+import { useState, useEffect, useCallback } from "react";
+import { apiClient } from "../lib/api-client";
 import { useToast } from "./toast";
 
 interface InviteLinkModalProps {
@@ -20,18 +16,37 @@ export function InviteLinkModal({
   onClose,
 }: InviteLinkModalProps) {
   const { showToast } = useToast();
-  const [code, setCode] = useState<string | null>(
-    () => getInviteCode(roomId)
-  );
+  const [code, setCode] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
 
-  const inviteUrl = code
-    ? `${typeof window !== "undefined" ? window.location.origin : ""}/chat/join/${code}`
-    : null;
+  const inviteUrl =
+    code && typeof window !== "undefined"
+      ? `${window.location.origin}/chat/join/${code}`
+      : null;
 
-  const handleGenerate = useCallback(() => {
-    const newCode = generateInviteCode(roomId);
-    setCode(newCode);
-    showToast("Invite link generated", "success");
+  // Load existing invite on open
+  useEffect(() => {
+    apiClient
+      .get<{ code: string | null }>(`/rooms/${roomId}/invite`)
+      .then(({ code: existing }) => setCode(existing))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [roomId]);
+
+  const handleGenerate = useCallback(async () => {
+    setWorking(true);
+    try {
+      const { code: newCode } = await apiClient.post<{ code: string }>(
+        `/rooms/${roomId}/invite`
+      );
+      setCode(newCode);
+      showToast("Invite link generated", "success");
+    } catch {
+      showToast("Failed to generate invite link", "error");
+    } finally {
+      setWorking(false);
+    }
   }, [roomId, showToast]);
 
   const handleCopy = useCallback(() => {
@@ -42,10 +57,17 @@ export function InviteLinkModal({
     }
   }, [inviteUrl, showToast]);
 
-  const handleRevoke = useCallback(() => {
-    revokeInviteCode(roomId);
-    setCode(null);
-    showToast("Invite link revoked", "info");
+  const handleRevoke = useCallback(async () => {
+    setWorking(true);
+    try {
+      await apiClient.delete(`/rooms/${roomId}/invite`);
+      setCode(null);
+      showToast("Invite link revoked", "info");
+    } catch {
+      showToast("Failed to revoke invite link", "error");
+    } finally {
+      setWorking(false);
+    }
   }, [roomId, showToast]);
 
   return (
@@ -67,7 +89,14 @@ export function InviteLinkModal({
         </div>
 
         <div className="p-4">
-          {code ? (
+          {loading ? (
+            <div className="flex justify-center py-4">
+              <svg className="h-5 w-5 animate-spin text-text-secondary" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+          ) : code ? (
             <>
               <p className="mb-2 text-xs text-text-secondary">
                 Share this invite link with others:
@@ -86,13 +115,15 @@ export function InviteLinkModal({
               <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={handleGenerate}
-                  className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+                  disabled={working}
+                  className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary disabled:opacity-50"
                 >
                   Regenerate
                 </button>
                 <button
                   onClick={handleRevoke}
-                  className="rounded-md border border-red-500/30 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10"
+                  disabled={working}
+                  className="rounded-md border border-red-500/30 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 disabled:opacity-50"
                 >
                   Revoke
                 </button>
@@ -105,9 +136,10 @@ export function InviteLinkModal({
               </p>
               <button
                 onClick={handleGenerate}
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                disabled={working}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
               >
-                Generate Invite Link
+                {working ? "Generating..." : "Generate Invite Link"}
               </button>
             </div>
           )}
