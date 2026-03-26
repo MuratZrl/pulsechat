@@ -6,6 +6,7 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["-e", "require('child_process').execSync('npx next dev',{stdio:'inherit'})"],
       "port": 3000,
+      "autoPort": true,
       "cwd": "apps/web"
     },
     {

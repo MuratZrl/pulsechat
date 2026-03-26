@@ -3,11 +3,9 @@
 import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useAuth, SocialProvider } from "../contexts/auth-context";
+import { useAuth } from "../contexts/auth-context";
 import { useToast } from "../components/toast";
 import { PasswordInput } from "../components/password-input";
-import { SocialLoginButtons } from "../components/social-login-buttons";
-import { SocialAuthModal } from "../components/social-auth-modal";
 import { validateEmail, validatePassword } from "../lib/validation";
 
 export default function RegisterPage() {
@@ -16,8 +14,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
-  const [socialProvider, setSocialProvider] = useState<SocialProvider | null>(null);
-  const { register, socialLogin, user, loading } = useAuth();
+  const { register, user, loading } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
 
@@ -26,17 +23,6 @@ export default function RegisterPage() {
       router.replace("/chat");
     }
   }, [user, loading, router]);
-
-  function handleSocialAuth(data: { provider: SocialProvider; providerUserId: string; providerEmail: string; providerName: string }) {
-    const result = socialLogin(data.provider, data.providerUserId, data.providerEmail, data.providerName);
-    if (result.success) {
-      showToast("Account created!", "success");
-      router.push("/chat");
-    } else {
-      setError(result.error || "Social login failed");
-    }
-    setSocialProvider(null);
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -85,8 +71,6 @@ export default function RegisterPage() {
             Get started with Realtime Chat
           </p>
         </div>
-
-        <SocialLoginButtons onSelect={setSocialProvider} mode="register" />
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
@@ -163,13 +147,6 @@ export default function RegisterPage() {
         </p>
       </div>
 
-      {socialProvider && (
-        <SocialAuthModal
-          provider={socialProvider}
-          onAuth={handleSocialAuth}
-          onClose={() => setSocialProvider(null)}
-        />
-      )}
     </div>
   );
 }

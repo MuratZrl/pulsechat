@@ -3,11 +3,9 @@
 import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useAuth, SocialProvider } from "../contexts/auth-context";
+import { useAuth } from "../contexts/auth-context";
 import { useToast } from "../components/toast";
 import { PasswordInput } from "../components/password-input";
-import { SocialLoginButtons } from "../components/social-login-buttons";
-import { SocialAuthModal } from "../components/social-auth-modal";
 import { validateEmail } from "../lib/validation";
 
 export default function LoginPage() {
@@ -15,8 +13,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState("");
-  const [socialProvider, setSocialProvider] = useState<SocialProvider | null>(null);
-  const { login, socialLogin, user, loading } = useAuth();
+  const { login, user, loading } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
 
@@ -25,17 +22,6 @@ export default function LoginPage() {
       router.replace("/chat");
     }
   }, [user, loading, router]);
-
-  function handleSocialAuth(data: { provider: SocialProvider; providerUserId: string; providerEmail: string; providerName: string }) {
-    const result = socialLogin(data.provider, data.providerUserId, data.providerEmail, data.providerName);
-    if (result.success) {
-      showToast("Welcome!", "success");
-      router.push("/chat");
-    } else {
-      setError(result.error || "Social login failed");
-    }
-    setSocialProvider(null);
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -73,8 +59,6 @@ export default function LoginPage() {
             Sign in to your account
           </p>
         </div>
-
-        <SocialLoginButtons onSelect={setSocialProvider} mode="login" />
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
@@ -136,13 +120,6 @@ export default function LoginPage() {
         </p>
       </div>
 
-      {socialProvider && (
-        <SocialAuthModal
-          provider={socialProvider}
-          onAuth={handleSocialAuth}
-          onClose={() => setSocialProvider(null)}
-        />
-      )}
     </div>
   );
 }
