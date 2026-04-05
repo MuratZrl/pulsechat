@@ -22,7 +22,7 @@ export function MessageActions({
   isStarred,
 }: MessageActionsProps) {
   return (
-    <div className="absolute -top-3 right-0 z-10 flex items-center gap-0.5 rounded-md border border-border bg-sidebar p-0.5 opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+    <div className={`absolute -top-3 z-10 flex items-center gap-0.5 rounded-md border border-border bg-sidebar p-0.5 opacity-0 shadow-md transition-opacity group-hover:opacity-100 ${isOwn ? "right-0" : "left-0"}`}>
       <ActionButton title="Reply" onClick={onReply}>
         <path d="M9 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-5 5v-5z" />
       </ActionButton>

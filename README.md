@@ -4,6 +4,18 @@ Full-featured real-time chat application with WebSocket support, multi-room chan
 
 ---
 
+## Screenshots
+
+| General Chat | Engineering Channel |
+|:---:|:---:|
+| ![General Chat](docs/screenshots/Screenshot%20(17).png) | ![Engineering Channel](docs/screenshots/Screenshot%20(24).png) |
+
+| DM with Pinned Messages | Settings Page |
+|:---:|:---:|
+| ![DM with Pinned Messages](docs/screenshots/Screenshot%20(18).png) | ![Settings Page](docs/screenshots/Screenshot%20(19).png) |
+
+---
+
 ## Architecture
 
 ```
