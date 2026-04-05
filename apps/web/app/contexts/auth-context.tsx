@@ -49,8 +49,11 @@ interface AuthContextType {
   changePassword: (
     currentPassword: string,
     newPassword: string
-  ) => { success: boolean; error?: string };
-  deleteAccount: (password: string) => { success: boolean; error?: string };
+  ) => Promise<{ success: boolean; error?: string }>;
+  deleteAccount: (
+    password: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  resendVerification: () => Promise<{ success: boolean; error?: string }>;
   socialLogin: (
     provider: SocialProvider,
     providerUserId: string,
@@ -151,15 +154,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // ── Stubs for features not yet in backend ───────────────────────────────────
+  // ── Password change ─────────────────────────────────────────────────────────
 
-  function changePassword(_currentPassword: string, _newPassword: string) {
-    return { success: false, error: "Password change not available yet" };
+  async function changePassword(currentPassword: string, newPassword: string) {
+    try {
+      await apiClient.post("/auth/change-password", {
+        currentPassword,
+        newPassword,
+      });
+      return { success: true };
+    } catch (e: unknown) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : "Password change failed",
+      };
+    }
   }
 
-  function deleteAccount(_password: string) {
-    return { success: false, error: "Account deletion not available yet" };
+  // ── Account deletion ────────────────────────────────────────────────────────
+
+  async function deleteAccount(password: string) {
+    try {
+      await apiClient.delete("/auth/account", { password });
+      logout();
+      return { success: true };
+    } catch (e: unknown) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : "Account deletion failed",
+      };
+    }
   }
+
+  // ── Resend verification email ───────────────────────────────────────────────
+
+  async function resendVerification() {
+    try {
+      await apiClient.post("/auth/resend-verification");
+      return { success: true };
+    } catch (e: unknown) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : "Failed to resend verification",
+      };
+    }
+  }
+
+  // ── Stubs for social features (not yet implemented) ─────────────────────────
 
   function socialLogin(
     _provider: SocialProvider,
@@ -198,6 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateProfile,
         changePassword,
         deleteAccount,
+        resendVerification,
         socialLogin,
         linkSocial,
         unlinkSocial,

@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -13,13 +14,14 @@ enum RoomType {
 }
 
 model User {
-  id           String            @id @default(cuid())
-  name         String
-  email        String            @unique
-  passwordHash String
-  bio          String            @default("")
-  avatarUrl    String?
-  createdAt    DateTime          @default(now())
+  id            String            @id @default(cuid())
+  name          String
+  email         String            @unique
+  passwordHash  String
+  bio           String            @default("")
+  avatarUrl     String?
+  emailVerified Boolean           @default(false)
+  createdAt     DateTime          @default(now())
   rooms        RoomMember[]
   messages     Message[]
   createdRooms Room[]            @relation("RoomCreator")

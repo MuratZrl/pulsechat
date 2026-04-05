@@ -91,15 +91,23 @@ export default function LoginPage() {
             label="Password"
           />
 
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-              className="h-4 w-4 rounded border-border bg-input accent-indigo-600"
-            />
-            <span className="text-sm text-text-secondary">Remember me</span>
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-4 w-4 rounded border-border bg-input accent-indigo-600"
+              />
+              <span className="text-sm text-text-secondary">Remember me</span>
+            </label>
+            <Link
+              href="/forgot-password"
+              className="text-sm font-medium text-indigo-400 hover:text-indigo-300 hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
 
           <button
             type="submit"

@@ -50,7 +50,7 @@ services:
       - uploads:/app/uploads
     # db push syncs schema without requiring migration files
     command: >
-      sh -c "npx prisma db push --accept-data-loss && node dist/main.js"
+      sh -c "npx prisma db push --skip-generate --accept-data-loss && node dist/src/main.js"
 
   web:
     build:

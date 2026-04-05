@@ -18,7 +18,7 @@ export default function ChatLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, resendVerification } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
   // Initialize singleton socket connection as soon as user is authenticated
@@ -46,10 +46,39 @@ export default function ChatLayout({
     }
   }, [user, loading, router]);
 
+  const [verificationSent, setVerificationSent] = useState(false);
+
+  async function handleResendVerification() {
+    const result = await resendVerification();
+    if (result.success) {
+      showToast("Verification email sent", "success");
+      setVerificationSent(true);
+    } else {
+      showToast(result.error || "Failed to send", "error");
+    }
+  }
+
   if (loading || !user) return null;
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen flex-col">
+      {/* Email verification banner */}
+      {user.emailVerified === false && (
+        <div className="flex items-center justify-center gap-2 bg-amber-500/10 px-4 py-2 text-sm text-amber-400">
+          <span>Please verify your email address.</span>
+          {verificationSent ? (
+            <span className="text-green-400">Verification email sent!</span>
+          ) : (
+            <button
+              onClick={handleResendVerification}
+              className="font-medium underline hover:text-amber-300"
+            >
+              Resend verification email
+            </button>
+          )}
+        </div>
+      )}
+      <div className="flex flex-1 overflow-hidden">
       {/* Mobile overlay backdrop */}
       {sidebarOpen && (
         <div
@@ -118,6 +147,7 @@ export default function ChatLayout({
           onCancel={() => setShowLogoutDialog(false)}
         />
       )}
+      </div>
     </div>
   );
 }

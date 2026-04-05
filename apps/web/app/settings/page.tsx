@@ -118,7 +118,7 @@ export default function SettingsPage() {
     setAvatarUrl(url);
   }
 
-  function handlePasswordSave(e: FormEvent) {
+  async function handlePasswordSave(e: FormEvent) {
     e.preventDefault();
     setPwError("");
     if (!currentPw || !newPw) {
@@ -134,7 +134,7 @@ export default function SettingsPage() {
       setPwError("Passwords do not match");
       return;
     }
-    const result = changePassword(currentPw, newPw);
+    const result = await changePassword(currentPw, newPw);
     if (result.success) {
       setCurrentPw("");
       setNewPw("");
@@ -145,14 +145,14 @@ export default function SettingsPage() {
     }
   }
 
-  function handleDeleteAccount() {
+  async function handleDeleteAccount() {
     setDeleteError("");
     if (isSocialOnly) {
       if (deleteConfirmText !== "DELETE") {
         setDeleteError("Type DELETE to confirm");
         return;
       }
-      const result = deleteAccount("");
+      const result = await deleteAccount("");
       if (result.success) {
         showToast("Account deleted", "info");
         router.replace("/login");
@@ -164,7 +164,7 @@ export default function SettingsPage() {
         setDeleteError("Password is required");
         return;
       }
-      const result = deleteAccount(deletePw);
+      const result = await deleteAccount(deletePw);
       if (result.success) {
         showToast("Account deleted", "info");
         router.replace("/login");

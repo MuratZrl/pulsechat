@@ -16,6 +16,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateMessageDto } from '../messages/dto/create-message.dto';
 import { EditMessageDto } from '../messages/dto/edit-message.dto';
 import { Injectable } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 
 interface AuthSocket extends Socket {
   userId: string;
@@ -30,6 +31,7 @@ interface AuthSocket extends Socket {
   },
   namespace: '/',
 })
+@SkipThrottle()
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
