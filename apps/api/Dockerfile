@@ -10,6 +10,7 @@ RUN npm run build
 RUN npx tsc prisma/seed.ts --esModuleInterop --resolveJsonModule --outDir dist/prisma --skipLibCheck
 
 FROM base AS runner
+RUN apk add --no-cache openssl
 ENV NODE_ENV=production
 RUN apk add --no-cache openssl
 COPY --from=builder /app/node_modules ./node_modules
