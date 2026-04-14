@@ -10,7 +10,7 @@ export class R2Service {
   private publicUrl: string;
 
   constructor(private config: ConfigService) {
-    this.bucket = this.config.get<string>('R2_BUCKET', 'realtime-chat-uploads');
+    this.bucket = this.config.get<string>('R2_BUCKET', 'pulsechat-uploads');
     this.publicUrl = this.config.get<string>('R2_PUBLIC_URL', '');
 
     this.s3 = new S3Client({

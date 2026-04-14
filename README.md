@@ -1,6 +1,6 @@
-# Real-time Chat
+# PulseChat
 
-Full-featured real-time chat application with WebSocket support, multi-room channels, direct messages, and rich messaging features.
+PulseChat — a full-featured real-time chat application with WebSocket support, multi-room channels, direct messages, and rich messaging features.
 
 ---
 
@@ -34,7 +34,7 @@ Full-featured real-time chat application with WebSocket support, multi-room chan
 ```
 
 ```
-realtime-chat/
+pulsechat/
 ├── apps/
 │   ├── api/                  # NestJS Backend
 │   │   ├── src/
@@ -129,8 +129,8 @@ User ──< RoomMember >── Room
 ### Quick Start (Docker)
 
 ```bash
-git clone https://github.com/MuratZrl/real-time-chat.git
-cd real-time-chat
+git clone https://github.com/MuratZrl/pulsechat.git
+cd pulsechat
 docker compose up
 ```
 

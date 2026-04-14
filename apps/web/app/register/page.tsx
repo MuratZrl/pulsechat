@@ -68,7 +68,7 @@ export default function RegisterPage() {
             Create account
           </h1>
           <p className="mt-1 text-sm text-text-secondary">
-            Get started with Realtime Chat
+            Get started with PulseChat
           </p>
         </div>
 
