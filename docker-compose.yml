@@ -44,13 +44,16 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh-in-production}
       PORT: 3001
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-REDACTED_R2_ACCOUNT_ID}
+      R2_BUCKET: ${R2_BUCKET:-realtime-chat-uploads}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-REDACTED_R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-REDACTED_R2_SECRET_ACCESS_KEY}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:-https://REDACTED_R2_PUBLIC_BUCKET.r2.dev}
     ports:
       - "3001:3001"
-    volumes:
-      - uploads:/app/uploads
     # db push syncs schema without requiring migration files
     command: >
-      sh -c "npx prisma db push --skip-generate --accept-data-loss && node dist/prisma/seed.js; node dist/src/main.js"
+      sh -c "node ./node_modules/prisma/build/index.js db push --skip-generate --accept-data-loss && node dist/prisma/seed.js; node dist/src/main.js"
 
   web:
     build:
@@ -66,4 +69,3 @@ services:
 
 volumes:
   postgres_data:
-  uploads:

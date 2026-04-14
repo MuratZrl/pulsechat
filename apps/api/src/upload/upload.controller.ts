@@ -8,23 +8,19 @@ import {
   Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { R2Service } from './r2.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('upload')
 export class UploadController {
+  constructor(private readonly r2: R2Service) {}
+
   @Post()
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads',
-        filename: (_req, file, cb) => {
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `${unique}${extname(file.originalname)}`);
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
       fileFilter: (_req, file, cb) => {
         const allowed = [
@@ -46,17 +42,19 @@ export class UploadController {
       },
     }),
   )
-  uploadFile(
+  async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Request() _req: unknown,
   ) {
     if (!file) throw new BadRequestException('No file provided');
 
+    const url = await this.r2.upload(file);
+
     const isImage = file.mimetype.startsWith('image/');
     const isVoice = file.mimetype.startsWith('audio/');
 
     return {
-      url: `/api/uploads/${file.filename}`,
+      url,
       name: file.originalname,
       size: this.formatSize(file.size),
       type: isImage ? 'image' : isVoice ? 'voice' : 'file',
