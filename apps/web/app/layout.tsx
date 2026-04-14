@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Realtime Chat",
-  description: "Real-time chat application",
+  title: "PulseChat",
+  description: "PulseChat — real-time chat application",
 };
 
 export default function RootLayout({

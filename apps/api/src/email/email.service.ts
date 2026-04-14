@@ -20,7 +20,7 @@ export class EmailService {
   }
 
   private get from(): string {
-    return this.config.get('SMTP_FROM', 'noreply@realtime-chat.app');
+    return this.config.get('SMTP_FROM', 'noreply@pulsechat.app');
   }
 
   private get frontendUrl(): string {

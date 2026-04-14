@@ -1,7 +1,7 @@
 {
-  "name": "@realtime-chat/shared",
+  "name": "@pulsechat/shared",
   "version": "1.0.0",
-  "description": "Shared types for realtime-chat monorepo",
+  "description": "Shared types for PulseChat monorepo",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

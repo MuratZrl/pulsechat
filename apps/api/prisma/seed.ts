@@ -65,12 +65,12 @@ async function main() {
       },
     }),
     prisma.user.upsert({
-      where: { email: 'system@realtime-chat.internal' },
+      where: { email: 'system@pulsechat.internal' },
       update: {},
       create: {
         id: 'user-system',
         name: 'System',
-        email: 'system@realtime-chat.internal',
+        email: 'system@pulsechat.internal',
         passwordHash: systemHash,
         emailVerified: true,
       },
