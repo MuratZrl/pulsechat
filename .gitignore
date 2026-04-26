@@ -32,6 +32,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+.claude/
 
 # Prisma generated
 apps/api/node_modules/
