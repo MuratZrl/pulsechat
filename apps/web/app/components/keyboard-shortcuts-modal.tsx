@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "./modal";
 import { SHORTCUTS, formatShortcut, Shortcut } from "../lib/keyboard-shortcuts";
 
 interface KeyboardShortcutsModalProps {
@@ -10,8 +11,11 @@ export function KeyboardShortcutsModal({ onClose }: KeyboardShortcutsModalProps)
   const categories = ["Navigation", "Panels", "Actions"] as const;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md rounded-lg border border-border bg-sidebar shadow-xl">
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      className="mx-4 w-full max-w-md rounded-lg border border-border bg-sidebar shadow-xl"
+    >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold text-text-primary">
@@ -54,8 +58,7 @@ export function KeyboardShortcutsModal({ onClose }: KeyboardShortcutsModalProps)
             Press <Kbd>Ctrl</Kbd> + <Kbd>/</Kbd> to toggle this dialog
           </p>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

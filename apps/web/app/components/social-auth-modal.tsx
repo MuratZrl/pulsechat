@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Modal } from "./modal";
 import { SocialProvider } from "../contexts/auth-context";
 
 interface MockAccount {
@@ -64,65 +65,61 @@ export function SocialAuthModal({ provider, onAuth, onClose }: SocialAuthModalPr
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      className="mx-4 w-full max-w-sm rounded-lg border border-border bg-sidebar p-5 shadow-xl"
     >
-      <div
-        className="mx-4 w-full max-w-sm rounded-lg border border-border bg-sidebar p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {loading ? (
-          <div className="flex flex-col items-center gap-3 py-8">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-indigo-500" />
-            <p className="text-sm text-text-secondary">
-              Signing in with {label}...
-            </p>
-          </div>
-        ) : (
-          <>
-            <h3 className="mb-1 text-sm font-semibold text-text-primary">
-              Sign in with {label}
-            </h3>
-            <p className="mb-4 text-xs text-text-secondary">
-              Choose a mock account to continue
-            </p>
+      {loading ? (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-indigo-500" />
+          <p className="text-sm text-text-secondary">
+            Signing in with {label}...
+          </p>
+        </div>
+      ) : (
+        <>
+          <h3 className="mb-1 text-sm font-semibold text-text-primary">
+            Sign in with {label}
+          </h3>
+          <p className="mb-4 text-xs text-text-secondary">
+            Choose a mock account to continue
+          </p>
 
-            <div className="space-y-1">
-              {accounts.map((account) => (
-                <button
-                  key={account.id}
-                  onClick={() => handleSelect(account)}
-                  className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-hover"
-                >
-                  <div
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ${account.color}`}
-                  >
-                    {account.initials}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-text-primary">
-                      {account.name}
-                    </p>
-                    <p className="truncate text-xs text-text-secondary">
-                      {account.email}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-4 flex justify-end">
+          <div className="space-y-1">
+            {accounts.map((account) => (
               <button
-                onClick={onClose}
-                className="rounded-md px-4 py-2 text-sm text-text-secondary hover:bg-hover hover:text-text-primary"
+                key={account.id}
+                onClick={() => handleSelect(account)}
+                className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-hover"
               >
-                Cancel
+                <div
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ${account.color}`}
+                >
+                  {account.initials}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-text-primary">
+                    {account.name}
+                  </p>
+                  <p className="truncate text-xs text-text-secondary">
+                    {account.email}
+                  </p>
+                </div>
               </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={onClose}
+              className="rounded-md px-4 py-2 text-sm text-text-secondary hover:bg-hover hover:text-text-primary"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }

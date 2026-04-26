@@ -8,6 +8,7 @@ import { useAuth } from "../contexts/auth-context";
 import { apiClient } from "../lib/api-client";
 import { useSocket } from "../hooks/useSocket";
 import { CreateRoomModal } from "./create-room-modal";
+import { DmPickerModal } from "./dm-picker-modal";
 import {
   getRoomCategory,
   setRoomCategory,
@@ -20,12 +21,6 @@ interface RoomListProps {
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
-interface AppUser {
-  id: string;
-  name: string;
-  avatarUrl?: string | null;
-}
-
 export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomListProps) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -33,8 +28,6 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [categoryMenu, setCategoryMenu] = useState<{ roomId: string; x: number; y: number } | null>(null);
   const [showDmList, setShowDmList] = useState(false);
-  const [users, setUsers] = useState<AppUser[]>([]);
-  const [userSearch, setUserSearch] = useState("");
   const pathname = usePathname();
   const { user } = useAuth();
   const { socket } = useSocket();
@@ -160,23 +153,12 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
     setShowModal(false);
   }
 
-  async function handleOpenDmList() {
-    setShowDmList(true);
-    try {
-      const list = await apiClient.get<AppUser[]>("/rooms/users/list");
-      setUsers(list);
-    } catch (e) {
-      console.error("Failed to load users:", e);
-    }
-  }
-
   async function handleStartDm(targetUserId: string) {
     try {
       const dm = await apiClient.post<{ id: string; name: string; type: string; isNew: boolean }>(
         `/rooms/dm/${targetUserId}`, {}
       );
       setShowDmList(false);
-      setUserSearch("");
       // Add/refresh DM room in list
       loadRooms();
       // Navigate to DM
@@ -200,10 +182,6 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
     setCategoryMenu(null);
     setRooms([...rooms]);
   }
-
-  const filteredUsers = userSearch
-    ? users.filter((u) => u.name.toLowerCase().includes(userSearch.toLowerCase()))
-    : users;
 
   function RoomLink({ room, prefix = "#" }: { room: Room; prefix?: string }) {
     const isActive = pathname === `/chat/${room.id}`;
@@ -300,7 +278,7 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
               {dms.length > 0 && <span className="ml-auto text-[10px] font-normal">{dms.length}</span>}
             </button>
             <button
-              onClick={handleOpenDmList}
+              onClick={() => setShowDmList(true)}
               title="New Direct Message"
               className="ml-1 rounded p-0.5 text-text-secondary hover:bg-hover hover:text-text-primary"
             >
@@ -315,7 +293,7 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
           {!collapsed["__dms"] && dms.length === 0 && (
             <p className="px-4 py-1.5 text-xs text-text-secondary">
               No DMs yet —{" "}
-              <button onClick={handleOpenDmList} className="text-indigo-400 hover:underline">start one</button>
+              <button onClick={() => setShowDmList(true)} className="text-indigo-400 hover:underline">start one</button>
             </p>
           )}
         </div>
@@ -355,39 +333,11 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
         </>
       )}
 
-      {/* DM user picker modal */}
       {showDmList && (
-        <>
-          <div className="fixed inset-0 z-50 bg-black/50" onClick={() => { setShowDmList(false); setUserSearch(""); }} />
-          <div className="fixed left-1/2 top-1/3 z-50 w-72 -translate-x-1/2 rounded-lg border border-border bg-sidebar p-4 shadow-xl">
-            <h3 className="mb-3 text-sm font-semibold text-text-primary">New Direct Message</h3>
-            <input
-              type="text"
-              value={userSearch}
-              onChange={(e) => setUserSearch(e.target.value)}
-              placeholder="Search users..."
-              autoFocus
-              className="mb-3 w-full rounded-md border border-border bg-input px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-            <div className="max-h-48 overflow-y-auto space-y-0.5">
-              {filteredUsers.length === 0 && (
-                <p className="py-2 text-center text-xs text-text-secondary">No users found</p>
-              )}
-              {filteredUsers.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => handleStartDm(u.id)}
-                  className="flex w-full items-center gap-2 rounded px-2 py-2 text-sm text-text-primary hover:bg-hover"
-                >
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">
-                    {u.name.slice(0, 2).toUpperCase()}
-                  </div>
-                  {u.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
+        <DmPickerModal
+          onClose={() => setShowDmList(false)}
+          onSelect={handleStartDm}
+        />
       )}
     </div>
   );

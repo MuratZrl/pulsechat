@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { Modal } from "./modal";
 import { apiClient } from "../lib/api-client";
 import { useToast } from "./toast";
 
@@ -71,8 +72,11 @@ export function InviteLinkModal({
   }, [roomId, showToast]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-sidebar shadow-xl">
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      className="mx-4 w-full max-w-sm rounded-lg border border-border bg-sidebar shadow-xl"
+    >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold text-text-primary">
@@ -144,7 +148,6 @@ export function InviteLinkModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

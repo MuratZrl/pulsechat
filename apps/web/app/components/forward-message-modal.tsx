@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Modal } from "./modal";
 import { Message } from "../types";
 import { apiClient } from "../lib/api-client";
 
@@ -41,8 +42,11 @@ export function ForwardMessageModal({
     : rooms;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-sidebar shadow-xl">
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      className="mx-4 w-full max-w-sm rounded-lg border border-border bg-sidebar shadow-xl"
+    >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold text-text-primary">
@@ -131,7 +135,6 @@ export function ForwardMessageModal({
             Forward
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

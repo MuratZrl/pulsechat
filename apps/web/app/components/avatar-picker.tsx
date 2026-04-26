@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import Cropper, { Area } from "react-easy-crop";
+import { Modal } from "./modal";
 import { PRESET_AVATARS } from "../lib/avatars";
 import { getAccessToken } from "../lib/api-client";
 
@@ -129,8 +130,11 @@ export function AvatarPicker({
   // Crop view
   if (cropImage) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div className="mx-4 w-full max-w-sm rounded-lg border border-border bg-sidebar p-5 shadow-xl">
+      <Modal
+        isOpen={true}
+        onClose={() => setCropImage(null)}
+        className="mx-4 w-full max-w-sm rounded-lg border border-border bg-sidebar p-5 shadow-xl"
+      >
           <h3 className="mb-3 text-sm font-semibold text-text-primary">
             Crop Avatar
           </h3>
@@ -193,15 +197,17 @@ export function AvatarPicker({
               {isUploading ? "Uploading..." : "Crop & Upload"}
             </button>
           </div>
-        </div>
-      </div>
+      </Modal>
     );
   }
 
   // Pick view (presets + upload button)
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="mx-4 w-full max-w-sm rounded-lg border border-border bg-sidebar p-5 shadow-xl">
+    <Modal
+      isOpen={true}
+      onClose={onClose}
+      className="mx-4 w-full max-w-sm rounded-lg border border-border bg-sidebar p-5 shadow-xl"
+    >
         <h3 className="mb-4 text-sm font-semibold text-text-primary">
           Choose Avatar
         </h3>
@@ -270,7 +276,6 @@ export function AvatarPicker({
             Apply
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
