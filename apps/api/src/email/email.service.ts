@@ -27,7 +27,16 @@ export class EmailService {
     return this.config.get('FRONTEND_URL', 'http://localhost:3000');
   }
 
+  private isSmtpConfigured(): boolean {
+    return Boolean(this.config.get('SMTP_HOST') && this.config.get('SMTP_USER'));
+  }
+
   async sendPasswordResetEmail(to: string, token: string): Promise<void> {
+    if (!this.isSmtpConfigured()) {
+      this.logger.warn(`SMTP not configured — skipping password reset email to ${to}`);
+      return;
+    }
+
     const resetUrl = `${this.frontendUrl}/reset-password?token=${token}`;
     try {
       await this.transporter.sendMail({
@@ -50,6 +59,11 @@ export class EmailService {
   }
 
   async sendVerificationEmail(to: string, token: string): Promise<void> {
+    if (!this.isSmtpConfigured()) {
+      this.logger.warn(`SMTP not configured — skipping verification email to ${to}`);
+      return;
+    }
+
     const verifyUrl = `${this.frontendUrl}/verify-email?token=${token}`;
     try {
       await this.transporter.sendMail({
