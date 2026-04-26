@@ -12,9 +12,7 @@ RUN npx tsc prisma/seed.ts --esModuleInterop --resolveJsonModule --outDir dist/p
 FROM base AS runner
 RUN apk add --no-cache openssl
 ENV NODE_ENV=production
-RUN apk add --no-cache openssl
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY prisma ./prisma
-EXPOSE 3001
 CMD ["node", "dist/src/main.js"]
