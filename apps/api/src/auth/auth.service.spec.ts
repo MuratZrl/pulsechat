@@ -54,6 +54,12 @@ describe('AuthService', () => {
     message: {
       updateMany: jest.fn(),
     },
+    refreshToken: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      delete: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     mention: {},
   };
 
@@ -102,6 +108,13 @@ describe('AuthService', () => {
       .mockResolvedValueOnce('refresh-token');
 
     mockJwt.verify.mockReturnValue({ sub: 'user-1', email: 'john@example.com' });
+
+    // Sensible defaults for the new RefreshToken model so individual tests
+    // only have to override what they actually exercise.
+    mockPrisma.refreshToken.create.mockResolvedValue({});
+    mockPrisma.refreshToken.findMany.mockResolvedValue([]);
+    mockPrisma.refreshToken.delete.mockResolvedValue({});
+    mockPrisma.refreshToken.deleteMany.mockResolvedValue({ count: 0 });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -175,16 +188,25 @@ describe('AuthService', () => {
       });
       expect(mockPrisma.roomMember.upsert).toHaveBeenCalledTimes(2);
       expect(mockJwt.signAsync).toHaveBeenCalledTimes(2);
+      // Refresh token must be persisted server-side so it can be revoked.
+      expect(mockPrisma.refreshToken.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.refreshToken.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          tokenHash: 'hashed-password',
+          expiresAt: expect.any(Date),
+        }),
+      });
     });
 
-    it('should throw ConflictException if email already exists', async () => {
+    it('should throw ConflictException with a generic message if email already exists', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
       await expect(service.register(registerDto)).rejects.toThrow(
         ConflictException,
       );
       await expect(service.register(registerDto)).rejects.toThrow(
-        'Email already registered',
+        'Registration could not be completed',
       );
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
@@ -221,10 +243,12 @@ describe('AuthService', () => {
         loginDto.password,
         mockUser.passwordHash,
       );
+      expect(mockPrisma.refreshToken.create).toHaveBeenCalledTimes(1);
     });
 
-    it('should throw UnauthorizedException for invalid email', async () => {
+    it('should still call bcrypt.compare when email does not exist (timing equalization)', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
       await expect(service.login(loginDto)).rejects.toThrow(
         UnauthorizedException,
@@ -232,7 +256,13 @@ describe('AuthService', () => {
       await expect(service.login(loginDto)).rejects.toThrow(
         'Invalid credentials',
       );
-      expect(bcrypt.compare).not.toHaveBeenCalled();
+      // bcrypt.compare runs against a dummy hash so timing does not reveal
+      // whether the email exists. Two reject assertions => two login calls.
+      expect(bcrypt.compare).toHaveBeenCalledTimes(2);
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        loginDto.password,
+        expect.stringMatching(/^\$2[ab]\$/),
+      );
     });
 
     it('should throw UnauthorizedException for wrong password', async () => {
@@ -251,15 +281,21 @@ describe('AuthService', () => {
   // ── Refresh Tokens ────────────────────────────────────────────────────────────
 
   describe('refreshTokens', () => {
-    it('should return new tokens for a valid refresh token', async () => {
-      const userPayload = {
-        id: 'user-1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        emailVerified: false,
+    it('should return new tokens for a valid refresh token and rotate the stored row', async () => {
+      const storedToken = {
+        id: 'rt-1',
+        userId: 'user-1',
+        tokenHash: 'hashed-refresh-token',
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(),
       };
       mockJwt.verify.mockReturnValue({ sub: 'user-1', email: 'john@example.com' });
-      mockPrisma.user.findUnique.mockResolvedValue(userPayload);
+      mockPrisma.refreshToken.findMany.mockResolvedValue([storedToken]);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'john@example.com',
+      });
 
       const result = await service.refreshTokens('valid-refresh-token');
 
@@ -270,13 +306,16 @@ describe('AuthService', () => {
       expect(mockJwt.verify).toHaveBeenCalledWith('valid-refresh-token', {
         secret: 'test-jwt-refresh-secret',
       });
-      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-        where: { id: 'user-1' },
-        select: { id: true, name: true, email: true, emailVerified: true },
+      // Old row must be deleted (rotation), new row inserted.
+      expect(mockPrisma.refreshToken.delete).toHaveBeenCalledWith({
+        where: { id: 'rt-1' },
       });
+      expect(mockPrisma.refreshToken.create).toHaveBeenCalledTimes(1);
+      // No reuse → no scorched-earth deleteMany.
+      expect(mockPrisma.refreshToken.deleteMany).not.toHaveBeenCalled();
     });
 
-    it('should throw UnauthorizedException for an invalid refresh token', async () => {
+    it('should throw UnauthorizedException for an invalid refresh token signature', async () => {
       mockJwt.verify.mockImplementation(() => {
         throw new Error('invalid token');
       });
@@ -287,15 +326,51 @@ describe('AuthService', () => {
       await expect(service.refreshTokens('invalid-token')).rejects.toThrow(
         'Invalid refresh token',
       );
+      expect(mockPrisma.refreshToken.findMany).not.toHaveBeenCalled();
+    });
+
+    it('should revoke all of a user\'s tokens when a valid-signature token has no DB row (reuse)', async () => {
+      mockJwt.verify.mockReturnValue({ sub: 'user-1', email: 'john@example.com' });
+      // Signature valid but no stored row matches — reuse path.
+      mockPrisma.refreshToken.findMany.mockResolvedValue([]);
+
+      await expect(service.refreshTokens('replayed-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
+      expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
     });
 
     it('should throw UnauthorizedException if user no longer exists', async () => {
       mockJwt.verify.mockReturnValue({ sub: 'deleted-user', email: 'gone@example.com' });
+      const storedToken = {
+        id: 'rt-1',
+        userId: 'deleted-user',
+        tokenHash: 'hashed-refresh-token',
+        expiresAt: new Date(Date.now() + 60_000),
+        createdAt: new Date(),
+      };
+      mockPrisma.refreshToken.findMany.mockResolvedValue([storedToken]);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
       await expect(service.refreshTokens('valid-token')).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  // ── Logout ────────────────────────────────────────────────────────────────────
+
+  describe('logout', () => {
+    it('should delete every refresh token for the user', async () => {
+      const result = await service.logout('user-1');
+      expect(result).toEqual({ message: 'Logged out' });
+      expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
     });
   });
 
@@ -340,7 +415,7 @@ describe('AuthService', () => {
       newPassword: 'NewPassword1!',
     };
 
-    it('should change the password successfully', async () => {
+    it('should change the password and revoke all refresh tokens', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       (bcrypt.hash as jest.Mock).mockResolvedValue('new-hashed-password');
@@ -358,6 +433,9 @@ describe('AuthService', () => {
         where: { id: 'user-1' },
         data: { passwordHash: 'new-hashed-password' },
       });
+      expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
     });
 
     it('should throw BadRequestException for wrong current password', async () => {
@@ -371,6 +449,7 @@ describe('AuthService', () => {
         service.changePassword('user-1', changePasswordDto),
       ).rejects.toThrow('Current password is incorrect');
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      expect(mockPrisma.refreshToken.deleteMany).not.toHaveBeenCalled();
     });
   });
 
@@ -419,7 +498,7 @@ describe('AuthService', () => {
       newPassword: 'NewPassword1!',
     };
 
-    it('should reset the password successfully', async () => {
+    it('should reset the password and revoke refresh tokens', async () => {
       mockRedis.get.mockResolvedValue('user-1');
       (bcrypt.hash as jest.Mock).mockResolvedValue('new-hashed-password');
       mockPrisma.user.update.mockResolvedValue({});
@@ -435,6 +514,9 @@ describe('AuthService', () => {
         data: { passwordHash: 'new-hashed-password' },
       });
       expect(mockRedis.del).toHaveBeenCalledWith('reset:valid-reset-token');
+      expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
     });
 
     it('should throw BadRequestException for invalid or expired token', async () => {
@@ -523,7 +605,7 @@ describe('AuthService', () => {
   // ── Delete Account ────────────────────────────────────────────────────────────
 
   describe('deleteAccount', () => {
-    it('should delete the account successfully', async () => {
+    it('should delete the account and revoke refresh tokens', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       mockPrisma.message.updateMany.mockResolvedValue({ count: 5 });
@@ -539,6 +621,9 @@ describe('AuthService', () => {
       expect(mockPrisma.message.updateMany).toHaveBeenCalledWith({
         where: { senderId: 'user-1' },
         data: { isDeleted: true, text: '' },
+      });
+      expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
       });
       expect(mockPrisma.user.delete).toHaveBeenCalledWith({
         where: { id: 'user-1' },
@@ -557,6 +642,7 @@ describe('AuthService', () => {
       ).rejects.toThrow('Incorrect password');
       expect(mockPrisma.message.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+      expect(mockPrisma.refreshToken.deleteMany).not.toHaveBeenCalled();
     });
   });
 });
