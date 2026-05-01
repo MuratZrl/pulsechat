@@ -112,32 +112,28 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    // bcrypt hashes are non-deterministic, so we can't query by hash.
-    // Pull the user's currently-valid tokens (typically 1–3) and compare.
-    const stored = await this.prisma.refreshToken.findMany({
-      where: { userId: payload.sub, expiresAt: { gt: new Date() } },
+    // SHA-256 over the full JWT, deterministic so we can look up by hash.
+    // bcrypt cannot be used here because it silently truncates at 72 bytes,
+    // and two distinct JWTs for the same user share their first 72 bytes
+    // (header + start of the payload), so bcrypt.compare conflated them.
+    const tokenHash = this.hashRefreshToken(refreshToken);
+    const stored = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
     });
 
-    let matched: (typeof stored)[number] | null = null;
-    for (const s of stored) {
-      if (await bcrypt.compare(refreshToken, s.tokenHash)) {
-        matched = s;
-        break;
-      }
-    }
-
-    if (!matched) {
-      // Signature was valid but no active stored row matches — this is either
-      // a revoked-then-replayed token or a forgery. Treat as reuse: nuke every
-      // refresh token for the user so an attacker holding a stale token can't
-      // race the legitimate session.
+    if (
+      !stored ||
+      stored.userId !== payload.sub ||
+      stored.expiresAt <= new Date()
+    ) {
+      // Signature valid but no live row matches this user — revoked/replayed
+      // token or a forgery. Treat as reuse: nuke every refresh token for the
+      // user so an attacker holding a stale token can't race the session.
       await this.prisma.refreshToken.deleteMany({
         where: { userId: payload.sub },
       });
       throw new UnauthorizedException('Invalid refresh token');
     }
-
-    await this.prisma.refreshToken.delete({ where: { id: matched.id } });
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
@@ -145,7 +141,19 @@ export class AuthService {
     });
     if (!user) throw new UnauthorizedException();
 
-    return this.generateTokens(user.id, user.email);
+    const issued = await this.issueTokens(user.id, user.email);
+    await this.prisma.$transaction([
+      this.prisma.refreshToken.delete({ where: { id: stored.id } }),
+      this.prisma.refreshToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: issued.refreshTokenHash,
+          expiresAt: issued.refreshExpiresAt,
+        },
+      }),
+    ]);
+
+    return { accessToken: issued.accessToken, refreshToken: issued.refreshToken };
   }
 
   // ── Logout ──────────────────────────────────────────────────────────────────
@@ -284,28 +292,49 @@ export class AuthService {
     await this.email.sendVerificationEmail(emailAddr, token);
   }
 
-  private async generateTokens(userId: string, email: string) {
+  private async issueTokens(userId: string, email: string) {
     const payload = { sub: userId, email };
     const refreshExpiresIn = this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+
+    // Refresh tokens carry a random jti so two issuances within the same
+    // second don't collide. Without it jsonwebtoken's second-granular iat
+    // makes back-to-back refreshes produce identical JWTs, which defeats the
+    // rotate-on-use defense (the "new" stored hash matches the old token).
+    const refreshPayload = {
+      ...payload,
+      jti: crypto.randomBytes(16).toString('hex'),
+    };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(payload, {
         secret: this.config.getOrThrow<string>('JWT_SECRET'),
         expiresIn: this.config.get('JWT_EXPIRES_IN') ?? '15m',
       }),
-      this.jwt.signAsync(payload, {
+      this.jwt.signAsync(refreshPayload, {
         secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: refreshExpiresIn,
       }),
     ]);
 
-    const tokenHash = await bcrypt.hash(refreshToken, 10);
-    const expiresAt = this.computeExpiry(refreshExpiresIn);
-    await this.prisma.refreshToken.create({
-      data: { userId, tokenHash, expiresAt },
-    });
+    const refreshTokenHash = this.hashRefreshToken(refreshToken);
+    const refreshExpiresAt = this.computeExpiry(refreshExpiresIn);
+    return { accessToken, refreshToken, refreshTokenHash, refreshExpiresAt };
+  }
 
-    return { accessToken, refreshToken };
+  private hashRefreshToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  private async generateTokens(userId: string, email: string) {
+    const issued = await this.issueTokens(userId, email);
+    await this.prisma.refreshToken.create({
+      data: {
+        userId,
+        tokenHash: issued.refreshTokenHash,
+        expiresAt: issued.refreshExpiresAt,
+      },
+    });
+    return { accessToken: issued.accessToken, refreshToken: issued.refreshToken };
   }
 
   private computeExpiry(durationStr: string): Date {

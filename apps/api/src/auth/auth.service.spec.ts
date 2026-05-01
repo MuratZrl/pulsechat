@@ -7,17 +7,27 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { createHash } from 'crypto';
 import { AuthService } from './auth.service';
+
+const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { EmailService } from '../email/email.service';
 
 jest.mock('bcrypt');
-jest.mock('crypto', () => ({
-  randomBytes: jest.fn(() => ({
-    toString: jest.fn(() => 'mock-random-token'),
-  })),
-}));
+jest.mock('crypto', () => {
+  // Keep real createHash etc. — refresh tokens hash via crypto.createHash
+  // (sha256). Only stub randomBytes to make jti/reset/verify tokens
+  // deterministic.
+  const actual = jest.requireActual<typeof import('crypto')>('crypto');
+  return {
+    ...actual,
+    randomBytes: jest.fn(() => ({
+      toString: jest.fn(() => 'mock-random-token'),
+    })),
+  };
+});
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -57,10 +67,16 @@ describe('AuthService', () => {
     refreshToken: {
       create: jest.fn(),
       findMany: jest.fn(),
+      findUnique: jest.fn(),
       delete: jest.fn(),
       deleteMany: jest.fn(),
     },
     mention: {},
+    $transaction: jest.fn(async (ops: unknown) =>
+      Array.isArray(ops)
+        ? Promise.all(ops as Promise<unknown>[])
+        : (ops as (p: unknown) => Promise<unknown>)(mockPrisma),
+    ),
   };
 
   const mockJwt = {
@@ -113,6 +129,7 @@ describe('AuthService', () => {
     // only have to override what they actually exercise.
     mockPrisma.refreshToken.create.mockResolvedValue({});
     mockPrisma.refreshToken.findMany.mockResolvedValue([]);
+    mockPrisma.refreshToken.findUnique.mockResolvedValue(null);
     mockPrisma.refreshToken.delete.mockResolvedValue({});
     mockPrisma.refreshToken.deleteMany.mockResolvedValue({ count: 0 });
 
@@ -193,7 +210,7 @@ describe('AuthService', () => {
       expect(mockPrisma.refreshToken.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           userId: 'user-1',
-          tokenHash: 'hashed-password',
+          tokenHash: sha256('refresh-token'),
           expiresAt: expect.any(Date),
         }),
       });
@@ -281,38 +298,155 @@ describe('AuthService', () => {
   // ── Refresh Tokens ────────────────────────────────────────────────────────────
 
   describe('refreshTokens', () => {
-    it('should return new tokens for a valid refresh token and rotate the stored row', async () => {
-      const storedToken = {
-        id: 'rt-1',
-        userId: 'user-1',
-        tokenHash: 'hashed-refresh-token',
-        expiresAt: new Date(Date.now() + 60_000),
-        createdAt: new Date(),
-      };
+    type Row = {
+      id: string;
+      userId: string;
+      tokenHash: string;
+      expiresAt: Date;
+      createdAt: Date;
+    };
+
+    // Build an in-memory RefreshToken store that supports the queries the
+    // service uses (findUnique by tokenHash, delete, create, deleteMany).
+    // Storage uses real sha256 — bcrypt is unsafe for refresh tokens because
+    // it silently truncates inputs at 72 bytes, which conflated rotated JWTs
+    // that share their first 72 bytes (header + start of payload).
+    function installInMemoryRefreshTokenStore(seed: Row[]) {
+      const rows = new Map<string, Row>();
+      for (const r of seed) rows.set(r.id, r);
+      let nextId = seed.length + 1;
+
+      mockPrisma.refreshToken.findUnique.mockImplementation(
+        async ({ where }: { where: { tokenHash: string } }) => {
+          for (const row of rows.values()) {
+            if (row.tokenHash === where.tokenHash) return row;
+          }
+          return null;
+        },
+      );
+      mockPrisma.refreshToken.delete.mockImplementation(
+        async ({ where }: { where: { id: string } }) => {
+          const row = rows.get(where.id);
+          rows.delete(where.id);
+          return row ?? {};
+        },
+      );
+      mockPrisma.refreshToken.create.mockImplementation(
+        async ({ data }: { data: { userId: string; tokenHash: string; expiresAt: Date } }) => {
+          const id = `rt-${nextId++}`;
+          const row: Row = { id, ...data, createdAt: new Date() };
+          rows.set(id, row);
+          return row;
+        },
+      );
+      mockPrisma.refreshToken.deleteMany.mockImplementation(
+        async ({ where }: { where: { userId: string } }) => {
+          let count = 0;
+          for (const [id, row] of [...rows.entries()]) {
+            if (row.userId === where.userId) {
+              rows.delete(id);
+              count++;
+            }
+          }
+          return { count };
+        },
+      );
+
+      return rows;
+    }
+
+    it('should return new tokens for a valid refresh token and rotate atomically', async () => {
+      const future = new Date(Date.now() + 60_000);
+      const rows = installInMemoryRefreshTokenStore([
+        {
+          id: 'rt-1',
+          userId: 'user-1',
+          tokenHash: sha256('OLDTOKEN'),
+          expiresAt: future,
+          createdAt: new Date(),
+        },
+      ]);
+
       mockJwt.verify.mockReturnValue({ sub: 'user-1', email: 'john@example.com' });
-      mockPrisma.refreshToken.findMany.mockResolvedValue([storedToken]);
-      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
         email: 'john@example.com',
       });
 
-      const result = await service.refreshTokens('valid-refresh-token');
+      const result = await service.refreshTokens('OLDTOKEN');
 
-      expect(result).toEqual({
-        accessToken: 'access-token',
-        refreshToken: 'refresh-token',
-      });
-      expect(mockJwt.verify).toHaveBeenCalledWith('valid-refresh-token', {
-        secret: 'test-jwt-refresh-secret',
-      });
-      // Old row must be deleted (rotation), new row inserted.
-      expect(mockPrisma.refreshToken.delete).toHaveBeenCalledWith({
-        where: { id: 'rt-1' },
-      });
-      expect(mockPrisma.refreshToken.create).toHaveBeenCalledTimes(1);
-      // No reuse → no scorched-earth deleteMany.
+      expect(result.accessToken).toBe('access-token');
+      expect(result.refreshToken).toBe('refresh-token');
+      // Rotation must run inside a transaction for atomicity.
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(rows.size).toBe(1);
+      const remaining = [...rows.values()][0];
+      expect(remaining.tokenHash).toBe(sha256('refresh-token'));
+      expect(remaining.id).not.toBe('rt-1');
       expect(mockPrisma.refreshToken.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('should reject the same refresh token on a second use and revoke all tokens', async () => {
+      // Regression for "1st refresh succeeded, 2nd refresh with the same
+      // token also succeeded". The original implementation used bcrypt to
+      // hash refresh tokens; bcrypt truncates at 72 bytes, so two distinct
+      // JWTs for the same user (which share their first 72 bytes) collided,
+      // and the rotation path silently accepted the replay.
+      const future = new Date(Date.now() + 60_000);
+      const rows = installInMemoryRefreshTokenStore([
+        {
+          id: 'rt-1',
+          userId: 'user-1',
+          tokenHash: sha256('OLDTOKEN'),
+          expiresAt: future,
+          createdAt: new Date(),
+        },
+      ]);
+      mockJwt.verify.mockReturnValue({ sub: 'user-1', email: 'john@example.com' });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'john@example.com',
+      });
+
+      await service.refreshTokens('OLDTOKEN');
+      expect(rows.size).toBe(1);
+
+      await expect(service.refreshTokens('OLDTOKEN')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
+      expect(rows.size).toBe(0);
+    });
+
+    it('should sign each refresh token with a unique jti to prevent JWT collision', async () => {
+      // Without a jti, jsonwebtoken's second-granular iat causes back-to-back
+      // sign calls on the same payload to produce identical JWT strings,
+      // which silently breaks rotation (the new stored hash matches the old
+      // token). Guard against regressions by asserting the jti is included.
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'user-1',
+        name: 'John',
+        email: 'john@example.com',
+        emailVerified: false,
+      });
+      mockPrisma.room.findMany.mockResolvedValue([]);
+
+      await service.register({
+        name: 'John',
+        email: 'john@example.com',
+        password: 'Password1!',
+      });
+
+      const refreshSignCall = mockJwt.signAsync.mock.calls.find(
+        (call) => call[1]?.secret === 'test-jwt-refresh-secret',
+      );
+      expect(refreshSignCall).toBeDefined();
+      const refreshPayload = refreshSignCall![0] as Record<string, unknown>;
+      expect(typeof refreshPayload.jti).toBe('string');
+      expect((refreshPayload.jti as string).length).toBeGreaterThan(0);
     });
 
     it('should throw UnauthorizedException for an invalid refresh token signature', async () => {
@@ -332,7 +466,7 @@ describe('AuthService', () => {
     it('should revoke all of a user\'s tokens when a valid-signature token has no DB row (reuse)', async () => {
       mockJwt.verify.mockReturnValue({ sub: 'user-1', email: 'john@example.com' });
       // Signature valid but no stored row matches — reuse path.
-      mockPrisma.refreshToken.findMany.mockResolvedValue([]);
+      mockPrisma.refreshToken.findUnique.mockResolvedValue(null);
 
       await expect(service.refreshTokens('replayed-token')).rejects.toThrow(
         UnauthorizedException,
@@ -343,17 +477,40 @@ describe('AuthService', () => {
       expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
     });
 
-    it('should throw UnauthorizedException if user no longer exists', async () => {
-      mockJwt.verify.mockReturnValue({ sub: 'deleted-user', email: 'gone@example.com' });
-      const storedToken = {
+    it('should treat a token whose userId does not match the JWT sub as reuse', async () => {
+      // Defense against an attacker who somehow obtains a stored hash and
+      // forges a JWT for a different user.
+      mockJwt.verify.mockReturnValue({ sub: 'attacker', email: 'a@example.com' });
+      mockPrisma.refreshToken.findUnique.mockResolvedValue({
         id: 'rt-1',
-        userId: 'deleted-user',
-        tokenHash: 'hashed-refresh-token',
+        userId: 'victim',
+        tokenHash: sha256('valid-token'),
         expiresAt: new Date(Date.now() + 60_000),
         createdAt: new Date(),
-      };
-      mockPrisma.refreshToken.findMany.mockResolvedValue([storedToken]);
-      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      });
+
+      await expect(service.refreshTokens('valid-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'attacker' },
+      });
+    });
+
+    it('should throw UnauthorizedException if user no longer exists', async () => {
+      installInMemoryRefreshTokenStore([
+        {
+          id: 'rt-1',
+          userId: 'deleted-user',
+          tokenHash: sha256('valid-token'),
+          expiresAt: new Date(Date.now() + 60_000),
+          createdAt: new Date(),
+        },
+      ]);
+      mockJwt.verify.mockReturnValue({
+        sub: 'deleted-user',
+        email: 'gone@example.com',
+      });
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
       await expect(service.refreshTokens('valid-token')).rejects.toThrow(
