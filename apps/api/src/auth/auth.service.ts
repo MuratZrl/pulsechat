@@ -21,6 +21,12 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  // Pre-computed bcrypt hash used to equalize timing on login when the email
+  // does not exist. Without it, a missing user short-circuits the bcrypt
+  // compare and an attacker can enumerate accounts by measuring response time.
+  private readonly DUMMY_HASH =
+    '$2b$10$aqE9nW9rXJK0Y.cDQBEPZuk5JBXuh5XEEhCcTa0oRV2bWrWg5p83e';
+
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
@@ -35,7 +41,12 @@ export class AuthService {
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
-    if (existing) throw new ConflictException('Email already registered');
+    if (existing) {
+      // Generic message — full anti-enumeration would return a fake success
+      // and notify the existing address out-of-band. The 409 status still
+      // leaks existence; revisit if/when register goes async.
+      throw new ConflictException('Registration could not be completed');
+    }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const user = await this.prisma.user.create({
@@ -70,10 +81,17 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
 
-    const valid = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
+    // Always run bcrypt.compare so timing does not reveal whether the email
+    // exists. A real user is checked against their own hash; a missing user
+    // is checked against a static dummy hash.
+    const validPassword = user
+      ? await bcrypt.compare(dto.password, user.passwordHash)
+      : await bcrypt.compare(dto.password, this.DUMMY_HASH);
+
+    if (!user || !validPassword) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     const tokens = await this.generateTokens(user.id, user.email);
     return {
@@ -85,20 +103,64 @@ export class AuthService {
   // ── Refresh ─────────────────────────────────────────────────────────────────
 
   async refreshTokens(refreshToken: string) {
+    let payload: { sub: string; email: string };
     try {
-      const payload = this.jwt.verify<{ sub: string; email: string }>(
-        refreshToken,
-        { secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET') },
-      );
-      const user = await this.prisma.user.findUnique({
-        where: { id: payload.sub },
-        select: { id: true, name: true, email: true, emailVerified: true },
+      payload = this.jwt.verify<{ sub: string; email: string }>(refreshToken, {
+        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
       });
-      if (!user) throw new UnauthorizedException();
-      return this.generateTokens(user.id, user.email);
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
+
+    // SHA-256 over the full JWT, deterministic so we can look up by hash.
+    // bcrypt cannot be used here because it silently truncates at 72 bytes,
+    // and two distinct JWTs for the same user share their first 72 bytes
+    // (header + start of the payload), so bcrypt.compare conflated them.
+    const tokenHash = this.hashRefreshToken(refreshToken);
+    const stored = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
+    });
+
+    if (
+      !stored ||
+      stored.userId !== payload.sub ||
+      stored.expiresAt <= new Date()
+    ) {
+      // Signature valid but no live row matches this user — revoked/replayed
+      // token or a forgery. Treat as reuse: nuke every refresh token for the
+      // user so an attacker holding a stale token can't race the session.
+      await this.prisma.refreshToken.deleteMany({
+        where: { userId: payload.sub },
+      });
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, email: true },
+    });
+    if (!user) throw new UnauthorizedException();
+
+    const issued = await this.issueTokens(user.id, user.email);
+    await this.prisma.$transaction([
+      this.prisma.refreshToken.delete({ where: { id: stored.id } }),
+      this.prisma.refreshToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: issued.refreshTokenHash,
+          expiresAt: issued.refreshExpiresAt,
+        },
+      }),
+    ]);
+
+    return { accessToken: issued.accessToken, refreshToken: issued.refreshToken };
+  }
+
+  // ── Logout ──────────────────────────────────────────────────────────────────
+
+  async logout(userId: string) {
+    await this.revokeAllRefreshTokens(userId);
+    return { message: 'Logged out' };
   }
 
   // ── Get Me ──────────────────────────────────────────────────────────────────
@@ -127,6 +189,10 @@ export class AuthService {
       where: { id: userId },
       data: { passwordHash },
     });
+
+    // Invalidate every existing session — a password change must log out
+    // any other device that still holds an old refresh token.
+    await this.revokeAllRefreshTokens(userId);
 
     return { message: 'Password changed successfully' };
   }
@@ -162,6 +228,7 @@ export class AuthService {
     });
 
     await this.redis.del(`reset:${dto.token}`);
+    await this.revokeAllRefreshTokens(userId);
 
     return { message: 'Password has been reset successfully' };
   }
@@ -207,6 +274,10 @@ export class AuthService {
       data: { isDeleted: true, text: '' },
     });
 
+    // Cascade on User would purge refresh tokens too, but explicit is clearer
+    // and survives a future change to the FK rule.
+    await this.revokeAllRefreshTokens(userId);
+
     // Delete user (cascades: room members, reactions, mentions, pins, stars, read receipts, invites)
     await this.prisma.user.delete({ where: { id: userId } });
 
@@ -221,18 +292,65 @@ export class AuthService {
     await this.email.sendVerificationEmail(emailAddr, token);
   }
 
-  private async generateTokens(userId: string, email: string) {
+  private async issueTokens(userId: string, email: string) {
     const payload = { sub: userId, email };
+    const refreshExpiresIn = this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+
+    // Refresh tokens carry a random jti so two issuances within the same
+    // second don't collide. Without it jsonwebtoken's second-granular iat
+    // makes back-to-back refreshes produce identical JWTs, which defeats the
+    // rotate-on-use defense (the "new" stored hash matches the old token).
+    const refreshPayload = {
+      ...payload,
+      jti: crypto.randomBytes(16).toString('hex'),
+    };
+
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(payload, {
         secret: this.config.getOrThrow<string>('JWT_SECRET'),
         expiresIn: this.config.get('JWT_EXPIRES_IN') ?? '15m',
       }),
-      this.jwt.signAsync(payload, {
+      this.jwt.signAsync(refreshPayload, {
         secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-        expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d',
+        expiresIn: refreshExpiresIn,
       }),
     ]);
-    return { accessToken, refreshToken };
+
+    const refreshTokenHash = this.hashRefreshToken(refreshToken);
+    const refreshExpiresAt = this.computeExpiry(refreshExpiresIn);
+    return { accessToken, refreshToken, refreshTokenHash, refreshExpiresAt };
+  }
+
+  private hashRefreshToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  private async generateTokens(userId: string, email: string) {
+    const issued = await this.issueTokens(userId, email);
+    await this.prisma.refreshToken.create({
+      data: {
+        userId,
+        tokenHash: issued.refreshTokenHash,
+        expiresAt: issued.refreshExpiresAt,
+      },
+    });
+    return { accessToken: issued.accessToken, refreshToken: issued.refreshToken };
+  }
+
+  private computeExpiry(durationStr: string): Date {
+    const match = durationStr.match(/^(\d+)([smhd])$/);
+    if (!match) throw new Error(`Invalid duration: ${durationStr}`);
+    const [, num, unit] = match;
+    const multipliers: Record<string, number> = {
+      s: 1000,
+      m: 60_000,
+      h: 3_600_000,
+      d: 86_400_000,
+    };
+    return new Date(Date.now() + parseInt(num, 10) * multipliers[unit]);
+  }
+
+  private async revokeAllRefreshTokens(userId: string) {
+    await this.prisma.refreshToken.deleteMany({ where: { userId } });
   }
 }
