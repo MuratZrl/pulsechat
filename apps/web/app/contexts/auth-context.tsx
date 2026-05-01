@@ -39,7 +39,7 @@ interface AuthContextType {
     email: string,
     password: string
   ) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateProfile: (updates: {
     name?: string;
     email?: string;
@@ -129,7 +129,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      await apiClient.post("/auth/logout");
+    } catch {
+      // Even if the API call fails (e.g. token already expired), still clear
+      // locally so the user is logged out from this device.
+    }
     clearTokens();
     disconnectSocket();
     setUser(null);
