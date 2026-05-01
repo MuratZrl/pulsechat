@@ -21,6 +21,12 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  // Pre-computed bcrypt hash used to equalize timing on login when the email
+  // does not exist. Without it, a missing user short-circuits the bcrypt
+  // compare and an attacker can enumerate accounts by measuring response time.
+  private readonly DUMMY_HASH =
+    '$2b$10$aqE9nW9rXJK0Y.cDQBEPZuk5JBXuh5XEEhCcTa0oRV2bWrWg5p83e';
+
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
@@ -35,7 +41,12 @@ export class AuthService {
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
-    if (existing) throw new ConflictException('Email already registered');
+    if (existing) {
+      // Generic message — full anti-enumeration would return a fake success
+      // and notify the existing address out-of-band. The 409 status still
+      // leaks existence; revisit if/when register goes async.
+      throw new ConflictException('Registration could not be completed');
+    }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const user = await this.prisma.user.create({
@@ -70,10 +81,17 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
-    if (!user) throw new UnauthorizedException('Invalid credentials');
 
-    const valid = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
+    // Always run bcrypt.compare so timing does not reveal whether the email
+    // exists. A real user is checked against their own hash; a missing user
+    // is checked against a static dummy hash.
+    const validPassword = user
+      ? await bcrypt.compare(dto.password, user.passwordHash)
+      : await bcrypt.compare(dto.password, this.DUMMY_HASH);
+
+    if (!user || !validPassword) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     const tokens = await this.generateTokens(user.id, user.email);
     return {
