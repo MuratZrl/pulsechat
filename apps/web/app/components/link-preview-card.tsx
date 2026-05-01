@@ -7,10 +7,22 @@ interface LinkPreviewCardProps {
   isOwn: boolean;
 }
 
+function safeHttpHref(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function LinkPreviewCard({ preview, isOwn }: LinkPreviewCardProps) {
+  const href = safeHttpHref(preview.url);
+  if (!href) return null;
+
   return (
     <a
-      href={preview.url}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
       className={`mt-1.5 flex gap-2 rounded-md border-l-2 border-indigo-500 p-2 transition-colors ${
