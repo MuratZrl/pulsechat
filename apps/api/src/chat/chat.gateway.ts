@@ -51,7 +51,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!token) throw new Error('No token');
 
       const payload = this.jwt.verify<{ sub: string; email: string }>(token, {
-        secret: this.config.get('JWT_SECRET'),
+        secret: this.config.getOrThrow<string>('JWT_SECRET'),
       });
 
       const user = await this.prisma.user.findUnique({
