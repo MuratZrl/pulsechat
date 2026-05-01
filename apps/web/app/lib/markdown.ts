@@ -1,6 +1,26 @@
 // Lightweight markdown parser — no dependencies
 // Supports: **bold**, *italic*, ~~strikethrough~~, `code`, ```code blocks```, > blockquotes, [links](url)
 
+const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:"]);
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function isSafeHttpUrl(href: string): boolean {
+  try {
+    const u = new URL(href);
+    return ALLOWED_LINK_PROTOCOLS.has(u.protocol);
+  } catch {
+    return false;
+  }
+}
+
 export function parseMarkdown(text: string): string {
   // Escape HTML
   let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -32,11 +52,13 @@ export function parseMarkdown(text: string): string {
   // Strikethrough
   html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
 
-  // Links
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a class="md-link" href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
-  );
+  // Links — only http(s) protocols allowed; anything else falls back to escaped plain text
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, url: string) => {
+    if (!isSafeHttpUrl(url)) {
+      return `[${escapeHtml(label)}](${escapeHtml(url)})`;
+    }
+    return `<a class="md-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
 
   // Blockquotes (lines starting with >)
   html = html.replace(
