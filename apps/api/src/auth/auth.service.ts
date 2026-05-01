@@ -88,7 +88,7 @@ export class AuthService {
     try {
       const payload = this.jwt.verify<{ sub: string; email: string }>(
         refreshToken,
-        { secret: this.config.get('JWT_REFRESH_SECRET') },
+        { secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET') },
       );
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
@@ -225,11 +225,11 @@ export class AuthService {
     const payload = { sub: userId, email };
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(payload, {
-        secret: this.config.get('JWT_SECRET'),
+        secret: this.config.getOrThrow<string>('JWT_SECRET'),
         expiresIn: this.config.get('JWT_EXPIRES_IN') ?? '15m',
       }),
       this.jwt.signAsync(payload, {
-        secret: this.config.get('JWT_REFRESH_SECRET'),
+        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d',
       }),
     ]);
