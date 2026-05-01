@@ -57,6 +57,59 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Database migrations
+
+Schema changes are tracked in `prisma/migrations/`. The runtime container
+runs `prisma migrate deploy` on start, so any committed migration that has
+not yet been applied to the target database is applied before the API
+process boots.
+
+### Local development
+
+After editing `prisma/schema.prisma`, create and apply a new migration:
+
+```bash
+npm run db:migrate -- --name <short_description>
+```
+
+This generates a folder under `prisma/migrations/`, applies it to the
+local database, and regenerates the Prisma client. Commit the generated
+SQL alongside the schema change.
+
+For quick prototyping in a feature branch you may still use
+`npm run db:push` to sync the schema without producing a migration, but
+**squash the result into a real migration before merging**.
+
+### Production
+
+`docker compose up` and the production image both run
+`prisma migrate deploy` automatically on container start. To run it
+manually against a remote database:
+
+```bash
+DATABASE_URL=... npm run db:migrate:deploy
+```
+
+### Production baseline (one-time)
+
+Databases that existed before this PR already have the tables defined by
+`0_init`. Before the first deploy that includes `prisma/migrations/`, mark
+that migration as applied so Prisma does not try to re-create the tables:
+
+```bash
+DATABASE_URL=... npx prisma migrate resolve --applied 0_init
+```
+
+After that, `prisma migrate deploy` will only run new migrations going
+forward. Skip this step on fresh databases — `migrate deploy` will create
+everything from scratch.
+
+### Never run db push against production
+
+`prisma db push` reconciles the database to the current schema with no
+migration history and silently destroys data when columns shrink or drop.
+It is fine for local prototyping only.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
