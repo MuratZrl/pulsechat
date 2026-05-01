@@ -85,20 +85,56 @@ export class AuthService {
   // ── Refresh ─────────────────────────────────────────────────────────────────
 
   async refreshTokens(refreshToken: string) {
+    let payload: { sub: string; email: string };
     try {
-      const payload = this.jwt.verify<{ sub: string; email: string }>(
-        refreshToken,
-        { secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET') },
-      );
-      const user = await this.prisma.user.findUnique({
-        where: { id: payload.sub },
-        select: { id: true, name: true, email: true, emailVerified: true },
+      payload = this.jwt.verify<{ sub: string; email: string }>(refreshToken, {
+        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
       });
-      if (!user) throw new UnauthorizedException();
-      return this.generateTokens(user.id, user.email);
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
+
+    // bcrypt hashes are non-deterministic, so we can't query by hash.
+    // Pull the user's currently-valid tokens (typically 1–3) and compare.
+    const stored = await this.prisma.refreshToken.findMany({
+      where: { userId: payload.sub, expiresAt: { gt: new Date() } },
+    });
+
+    let matched: (typeof stored)[number] | null = null;
+    for (const s of stored) {
+      if (await bcrypt.compare(refreshToken, s.tokenHash)) {
+        matched = s;
+        break;
+      }
+    }
+
+    if (!matched) {
+      // Signature was valid but no active stored row matches — this is either
+      // a revoked-then-replayed token or a forgery. Treat as reuse: nuke every
+      // refresh token for the user so an attacker holding a stale token can't
+      // race the legitimate session.
+      await this.prisma.refreshToken.deleteMany({
+        where: { userId: payload.sub },
+      });
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    await this.prisma.refreshToken.delete({ where: { id: matched.id } });
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, email: true },
+    });
+    if (!user) throw new UnauthorizedException();
+
+    return this.generateTokens(user.id, user.email);
+  }
+
+  // ── Logout ──────────────────────────────────────────────────────────────────
+
+  async logout(userId: string) {
+    await this.revokeAllRefreshTokens(userId);
+    return { message: 'Logged out' };
   }
 
   // ── Get Me ──────────────────────────────────────────────────────────────────
@@ -127,6 +163,10 @@ export class AuthService {
       where: { id: userId },
       data: { passwordHash },
     });
+
+    // Invalidate every existing session — a password change must log out
+    // any other device that still holds an old refresh token.
+    await this.revokeAllRefreshTokens(userId);
 
     return { message: 'Password changed successfully' };
   }
@@ -162,6 +202,7 @@ export class AuthService {
     });
 
     await this.redis.del(`reset:${dto.token}`);
+    await this.revokeAllRefreshTokens(userId);
 
     return { message: 'Password has been reset successfully' };
   }
@@ -207,6 +248,10 @@ export class AuthService {
       data: { isDeleted: true, text: '' },
     });
 
+    // Cascade on User would purge refresh tokens too, but explicit is clearer
+    // and survives a future change to the FK rule.
+    await this.revokeAllRefreshTokens(userId);
+
     // Delete user (cascades: room members, reactions, mentions, pins, stars, read receipts, invites)
     await this.prisma.user.delete({ where: { id: userId } });
 
@@ -223,6 +268,8 @@ export class AuthService {
 
   private async generateTokens(userId: string, email: string) {
     const payload = { sub: userId, email };
+    const refreshExpiresIn = this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(payload, {
         secret: this.config.getOrThrow<string>('JWT_SECRET'),
@@ -230,9 +277,33 @@ export class AuthService {
       }),
       this.jwt.signAsync(payload, {
         secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-        expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d',
+        expiresIn: refreshExpiresIn,
       }),
     ]);
+
+    const tokenHash = await bcrypt.hash(refreshToken, 10);
+    const expiresAt = this.computeExpiry(refreshExpiresIn);
+    await this.prisma.refreshToken.create({
+      data: { userId, tokenHash, expiresAt },
+    });
+
     return { accessToken, refreshToken };
+  }
+
+  private computeExpiry(durationStr: string): Date {
+    const match = durationStr.match(/^(\d+)([smhd])$/);
+    if (!match) throw new Error(`Invalid duration: ${durationStr}`);
+    const [, num, unit] = match;
+    const multipliers: Record<string, number> = {
+      s: 1000,
+      m: 60_000,
+      h: 3_600_000,
+      d: 86_400_000,
+    };
+    return new Date(Date.now() + parseInt(num, 10) * multipliers[unit]);
+  }
+
+  private async revokeAllRefreshTokens(userId: string) {
+    await this.prisma.refreshToken.deleteMany({ where: { userId } });
   }
 }
