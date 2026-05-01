@@ -11,10 +11,29 @@ import { EmailService } from './../src/email/email.service';
 describe('App (e2e)', () => {
   let app: INestApplication<App>;
 
+  // In-memory RefreshToken store. The auth service hashes refresh JWTs with
+  // sha256 and looks them up via findUnique({ where: { tokenHash } }), so the
+  // mock has to honour those queries for any test that hits login/register
+  // (which insert a row) or /auth/refresh (which rotates).
+  type RefreshTokenRow = {
+    id: string;
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    createdAt: Date;
+  };
+  const refreshTokenStore = new Map<string, RefreshTokenRow>();
+  let refreshTokenIdSeq = 0;
+
   const mockPrisma = {
     $connect: jest.fn(),
     $disconnect: jest.fn(),
     $queryRawUnsafe: jest.fn(),
+    $transaction: jest.fn(async (ops: unknown) =>
+      Array.isArray(ops)
+        ? Promise.all(ops as Promise<unknown>[])
+        : (ops as (p: unknown) => Promise<unknown>)(mockPrisma),
+    ),
     onModuleInit: jest.fn(),
     user: {
       findUnique: jest.fn(),
@@ -30,6 +49,57 @@ describe('App (e2e)', () => {
     },
     message: {
       updateMany: jest.fn(),
+    },
+    refreshToken: {
+      create: jest.fn(
+        async ({
+          data,
+        }: {
+          data: { userId: string; tokenHash: string; expiresAt: Date };
+        }) => {
+          const id = `rt-${++refreshTokenIdSeq}`;
+          const row: RefreshTokenRow = { id, ...data, createdAt: new Date() };
+          refreshTokenStore.set(id, row);
+          return row;
+        },
+      ),
+      findUnique: jest.fn(
+        async ({ where }: { where: { tokenHash: string } }) => {
+          for (const row of refreshTokenStore.values()) {
+            if (row.tokenHash === where.tokenHash) return row;
+          }
+          return null;
+        },
+      ),
+      findMany: jest.fn(
+        async ({
+          where,
+        }: {
+          where: { userId: string; expiresAt?: { gt: Date } };
+        }) =>
+          [...refreshTokenStore.values()].filter(
+            (r) =>
+              r.userId === where.userId &&
+              (!where.expiresAt || r.expiresAt > where.expiresAt.gt),
+          ),
+      ),
+      delete: jest.fn(async ({ where }: { where: { id: string } }) => {
+        const row = refreshTokenStore.get(where.id);
+        refreshTokenStore.delete(where.id);
+        return row ?? {};
+      }),
+      deleteMany: jest.fn(
+        async ({ where }: { where: { userId: string } }) => {
+          let count = 0;
+          for (const [id, row] of [...refreshTokenStore.entries()]) {
+            if (row.userId === where.userId) {
+              refreshTokenStore.delete(id);
+              count++;
+            }
+          }
+          return { count };
+        },
+      ),
     },
   };
 
@@ -75,6 +145,8 @@ describe('App (e2e)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    refreshTokenStore.clear();
+    refreshTokenIdSeq = 0;
   });
 
   // ── Health ─────────────────────────────────────────────────────────────────
