@@ -62,15 +62,21 @@ describe('AuthService', () => {
     verify: jest.fn(),
   };
 
+  const configValues: Record<string, string> = {
+    JWT_SECRET: 'test-jwt-secret',
+    JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
+    JWT_EXPIRES_IN: '15m',
+    JWT_REFRESH_EXPIRES_IN: '7d',
+  };
+
   const mockConfig = {
-    get: jest.fn((key: string) => {
-      const values: Record<string, string> = {
-        JWT_SECRET: 'test-jwt-secret',
-        JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
-        JWT_EXPIRES_IN: '15m',
-        JWT_REFRESH_EXPIRES_IN: '7d',
-      };
-      return values[key];
+    get: jest.fn((key: string) => configValues[key]),
+    getOrThrow: jest.fn((key: string) => {
+      const value = configValues[key];
+      if (value === undefined) {
+        throw new Error(`Configuration key "${key}" does not exist`);
+      }
+      return value;
     }),
   };
 
