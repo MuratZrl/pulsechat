@@ -16,7 +16,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { CreateMessageDto } from '../messages/dto/create-message.dto';
 import { EditMessageDto } from '../messages/dto/edit-message.dto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 
 interface AuthSocket extends Socket {
@@ -36,6 +36,8 @@ interface AuthSocket extends Socket {
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
+
+  private readonly logger = new Logger(ChatGateway.name);
 
   constructor(
     private jwt: JwtService,
@@ -105,7 +107,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       for (const { roomId } of memberships) {
         await this.emitRoomUsers(roomId);
       }
-    } catch {
+
+      this.logger.debug(`User ${user.id} (${user.name}) connected`);
+    } catch (err) {
+      this.logger.warn(
+        `WS auth failed: ${err instanceof Error ? err.message : 'unknown error'}`,
+      );
       client.disconnect();
     }
   }
