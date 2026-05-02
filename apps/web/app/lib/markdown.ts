@@ -72,13 +72,20 @@ export function parseMarkdown(text: string): string {
   // through sanitize().
   if (typeof window === "undefined") return rawHtml;
 
+  // Note: ALLOWED_URI_REGEXP is intentionally NOT set. In DOMPurify v3 it
+  // gets applied to non-URI attributes too (target, rel) and would strip
+  // their values. Protocol filtering happens in two layers without it:
+  //   1. The link renderer's isSafeHttpUrl rejects non-http(s) before HTML
+  //      is generated.
+  //   2. DOMPurify's default URI scheme allowlist still blocks javascript:,
+  //      data:, vbscript: on any href that slipped through (e.g. raw HTML
+  //      in the markdown source).
   return DOMPurify.sanitize(rawHtml, {
     ALLOWED_TAGS: [
       "p", "br", "strong", "em", "del", "code", "pre",
       "blockquote", "a", "ul", "ol", "li", "mark",
     ],
     ALLOWED_ATTR: ["href", "class", "target", "rel", "title"],
-    ALLOWED_URI_REGEXP: /^(?:https?:\/\/|mailto:|#)/i,
   });
 }
 
