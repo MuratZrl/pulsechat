@@ -13,6 +13,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { MessagesService } from '../messages/messages.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { CreateMessageDto } from '../messages/dto/create-message.dto';
 import { EditMessageDto } from '../messages/dto/edit-message.dto';
 import { Injectable } from '@nestjs/common';
@@ -41,7 +42,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private config: ConfigService,
     private messagesService: MessagesService,
     private prisma: PrismaService,
+    private redis: RedisService,
   ) {}
+
+  /**
+   * Sliding-window rate limit per (action, user). Increments a counter in
+   * Redis and sets a TTL on first hit; returns false once the counter
+   * exceeds the limit until the window expires.
+   */
+  private async checkRateLimit(
+    userId: string,
+    action: string,
+    limit: number,
+    windowSeconds = 60,
+  ): Promise<boolean> {
+    const key = `rl:${action}:${userId}`;
+    const count = await this.redis.incr(key);
+    if (count === 1) {
+      await this.redis.expire(key, windowSeconds);
+    }
+    return count <= limit;
+  }
 
   async handleConnection(client: AuthSocket) {
     try {
@@ -125,6 +146,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: CreateMessageDto & { roomId: string },
   ) {
+    if (!(await this.checkRateLimit(client.userId, 'msg', 30))) {
+      throw new WsException('Rate limit exceeded — slow down');
+    }
     try {
       const { roomId, ...dto } = data;
       const message = await this.messagesService.sendMessage(
@@ -164,6 +188,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { messageId: string; text: string },
   ) {
+    if (!(await this.checkRateLimit(client.userId, 'edit', 60))) {
+      throw new WsException('Rate limit exceeded — slow down');
+    }
     try {
       const dto: EditMessageDto = { text: data.text };
       const updated = await this.messagesService.editMessage(
@@ -206,6 +233,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { messageId: string; emoji: string },
   ) {
+    if (!(await this.checkRateLimit(client.userId, 'reaction', 60))) {
+      throw new WsException('Rate limit exceeded — slow down');
+    }
     try {
       const result = await this.messagesService.toggleReaction(
         data.messageId,
