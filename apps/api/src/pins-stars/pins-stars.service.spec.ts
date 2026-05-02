@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Prisma } from '@prisma/client';
 import { PinsStarsService } from './pins-stars.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -13,12 +14,14 @@ describe('PinsStarsService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         delete: jest.fn(),
+        deleteMany: jest.fn(),
       },
       star: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
         create: jest.fn(),
         delete: jest.fn(),
+        deleteMany: jest.fn(),
       },
       message: {
         findUnique: jest.fn(),
@@ -43,7 +46,6 @@ describe('PinsStarsService', () => {
     const userId = 'user-1';
 
     it('should create a pin when none exists and return updated pin ids', async () => {
-      prisma.pin.findUnique.mockResolvedValue(null);
       prisma.pin.create.mockResolvedValue({ id: 'pin-1', messageId, userId, roomId });
       prisma.pin.findMany.mockResolvedValue([
         { messageId: 'msg-1' },
@@ -52,27 +54,37 @@ describe('PinsStarsService', () => {
 
       const result = await service.togglePin(roomId, messageId, userId);
 
-      expect(prisma.pin.findUnique).toHaveBeenCalledWith({
-        where: { messageId_userId: { messageId, userId } },
-      });
       expect(prisma.pin.create).toHaveBeenCalledWith({
         data: { messageId, userId, roomId },
       });
-      expect(prisma.pin.delete).not.toHaveBeenCalled();
+      expect(prisma.pin.deleteMany).not.toHaveBeenCalled();
       expect(result).toEqual(['msg-1', 'msg-2']);
     });
 
-    it('should delete the pin when one already exists and return updated pin ids', async () => {
-      const existingPin = { id: 'pin-1', messageId, userId, roomId };
-      prisma.pin.findUnique.mockResolvedValue(existingPin);
-      prisma.pin.delete.mockResolvedValue(existingPin);
+    it('should delete the pin when create raises P2002 (already exists)', async () => {
+      prisma.pin.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+      prisma.pin.deleteMany.mockResolvedValue({ count: 1 });
       prisma.pin.findMany.mockResolvedValue([]);
 
       const result = await service.togglePin(roomId, messageId, userId);
 
-      expect(prisma.pin.delete).toHaveBeenCalledWith({ where: { id: 'pin-1' } });
-      expect(prisma.pin.create).not.toHaveBeenCalled();
+      expect(prisma.pin.deleteMany).toHaveBeenCalledWith({
+        where: { messageId, userId },
+      });
       expect(result).toEqual([]);
+    });
+
+    it('should rethrow non-P2002 errors from create', async () => {
+      const boom = new Error('connection lost');
+      prisma.pin.create.mockRejectedValue(boom);
+
+      await expect(service.togglePin(roomId, messageId, userId)).rejects.toBe(boom);
+      expect(prisma.pin.deleteMany).not.toHaveBeenCalled();
     });
   });
 
@@ -104,31 +116,40 @@ describe('PinsStarsService', () => {
     const roomId = 'room-1';
 
     it('should create a star when none exists and return true', async () => {
-      prisma.star.findUnique.mockResolvedValue(null);
       prisma.star.create.mockResolvedValue({ id: 'star-1', messageId, userId, roomId });
 
       const result = await service.toggleStar(messageId, userId, roomId);
 
-      expect(prisma.star.findUnique).toHaveBeenCalledWith({
-        where: { messageId_userId: { messageId, userId } },
-      });
       expect(prisma.star.create).toHaveBeenCalledWith({
         data: { messageId, userId, roomId },
       });
-      expect(prisma.star.delete).not.toHaveBeenCalled();
+      expect(prisma.star.deleteMany).not.toHaveBeenCalled();
       expect(result).toBe(true);
     });
 
-    it('should delete the star when one already exists and return false', async () => {
-      const existingStar = { id: 'star-1', messageId, userId, roomId };
-      prisma.star.findUnique.mockResolvedValue(existingStar);
-      prisma.star.delete.mockResolvedValue(existingStar);
+    it('should delete the star when create raises P2002 and return false', async () => {
+      prisma.star.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+      prisma.star.deleteMany.mockResolvedValue({ count: 1 });
 
       const result = await service.toggleStar(messageId, userId, roomId);
 
-      expect(prisma.star.delete).toHaveBeenCalledWith({ where: { id: 'star-1' } });
-      expect(prisma.star.create).not.toHaveBeenCalled();
+      expect(prisma.star.deleteMany).toHaveBeenCalledWith({
+        where: { messageId, userId },
+      });
       expect(result).toBe(false);
+    });
+
+    it('should rethrow non-P2002 errors from create', async () => {
+      const boom = new Error('connection lost');
+      prisma.star.create.mockRejectedValue(boom);
+
+      await expect(service.toggleStar(messageId, userId, roomId)).rejects.toBe(boom);
+      expect(prisma.star.deleteMany).not.toHaveBeenCalled();
     });
   });
 
@@ -249,8 +270,7 @@ describe('PinsStarsService', () => {
   describe('toggleStarLookup', () => {
     it('should look up the message room and delegate to toggleStar', async () => {
       prisma.message.findUnique.mockResolvedValue({ roomId: 'room-1' });
-      // toggleStar internals: no existing star -> create
-      prisma.star.findUnique.mockResolvedValue(null);
+      // toggleStar internals: no existing star -> create succeeds.
       prisma.star.create.mockResolvedValue({
         id: 'star-1',
         messageId: 'msg-1',
@@ -273,7 +293,7 @@ describe('PinsStarsService', () => {
       const result = await service.toggleStarLookup('nonexistent', 'user-1');
 
       expect(result).toBe(false);
-      expect(prisma.star.findUnique).not.toHaveBeenCalled();
+      expect(prisma.star.create).not.toHaveBeenCalled();
     });
   });
 });
