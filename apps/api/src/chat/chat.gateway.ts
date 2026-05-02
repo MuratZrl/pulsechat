@@ -13,9 +13,10 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { MessagesService } from '../messages/messages.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { CreateMessageDto } from '../messages/dto/create-message.dto';
 import { EditMessageDto } from '../messages/dto/edit-message.dto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 
 interface AuthSocket extends Socket {
@@ -36,12 +37,34 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
+  private readonly logger = new Logger(ChatGateway.name);
+
   constructor(
     private jwt: JwtService,
     private config: ConfigService,
     private messagesService: MessagesService,
     private prisma: PrismaService,
+    private redis: RedisService,
   ) {}
+
+  /**
+   * Sliding-window rate limit per (action, user). Increments a counter in
+   * Redis and sets a TTL on first hit; returns false once the counter
+   * exceeds the limit until the window expires.
+   */
+  private async checkRateLimit(
+    userId: string,
+    action: string,
+    limit: number,
+    windowSeconds = 60,
+  ): Promise<boolean> {
+    const key = `rl:${action}:${userId}`;
+    const count = await this.redis.incr(key);
+    if (count === 1) {
+      await this.redis.expire(key, windowSeconds);
+    }
+    return count <= limit;
+  }
 
   async handleConnection(client: AuthSocket) {
     try {
@@ -63,6 +86,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.userId = user.id;
       client.userName = user.name;
 
+      // Per-user room — used by direct emits like `mention` so we can target
+      // the user without knowing which sockets they currently have open.
+      await client.join(`user:${user.id}`);
+
       // Auto-join all rooms the user is a member of
       const memberships = await this.prisma.roomMember.findMany({
         where: { userId: user.id },
@@ -80,7 +107,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       for (const { roomId } of memberships) {
         await this.emitRoomUsers(roomId);
       }
-    } catch {
+
+      this.logger.debug(`User ${user.id} (${user.name}) connected`);
+    } catch (err) {
+      this.logger.warn(
+        `WS auth failed: ${err instanceof Error ? err.message : 'unknown error'}`,
+      );
       client.disconnect();
     }
   }
@@ -121,6 +153,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: CreateMessageDto & { roomId: string },
   ) {
+    if (!(await this.checkRateLimit(client.userId, 'msg', 30))) {
+      throw new WsException('Rate limit exceeded — slow down');
+    }
     try {
       const { roomId, ...dto } = data;
       const message = await this.messagesService.sendMessage(
@@ -131,20 +166,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       this.server.to(roomId).emit('new_message', message);
 
-      // Notify mentioned users
-      if (message.reactions !== undefined) {
-        const mentions = await this.prisma.mention.findMany({
-          where: { messageId: message.id },
-          select: { userId: true },
+      // Notify mentioned users via their per-user room. (The previous
+      // `if (message.reactions !== undefined)` guard was dead code — the
+      // formatter always returns a reactions field — and the emit targeted
+      // a room named after the userId that no socket had joined, so mention
+      // events never reached the client.)
+      const mentions = await this.prisma.mention.findMany({
+        where: { messageId: message.id },
+        select: { userId: true },
+      });
+      for (const { userId } of mentions) {
+        this.server.to(`user:${userId}`).emit('mention', {
+          roomId,
+          messageId: message.id,
+          fromName: client.userName,
+          text: message.text,
         });
-        for (const { userId } of mentions) {
-          this.server.to(userId).emit('mention', {
-            roomId,
-            messageId: message.id,
-            fromName: client.userName,
-            text: message.text,
-          });
-        }
       }
 
       return { success: true, message };
@@ -158,6 +195,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { messageId: string; text: string },
   ) {
+    if (!(await this.checkRateLimit(client.userId, 'edit', 60))) {
+      throw new WsException('Rate limit exceeded — slow down');
+    }
     try {
       const dto: EditMessageDto = { text: data.text };
       const updated = await this.messagesService.editMessage(
@@ -200,6 +240,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { messageId: string; emoji: string },
   ) {
+    if (!(await this.checkRateLimit(client.userId, 'reaction', 60))) {
+      throw new WsException('Rate limit exceeded — slow down');
+    }
     try {
       const result = await this.messagesService.toggleReaction(
         data.messageId,

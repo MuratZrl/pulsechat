@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -6,14 +7,20 @@ export class PinsStarsService {
   constructor(private prisma: PrismaService) {}
 
   async togglePin(roomId: string, messageId: string, userId: string): Promise<string[]> {
-    const existing = await this.prisma.pin.findUnique({
-      where: { messageId_userId: { messageId, userId } },
-    });
-
-    if (existing) {
-      await this.prisma.pin.delete({ where: { id: existing.id } });
-    } else {
+    // Atomic toggle: try to insert; on unique-constraint violation the row
+    // already exists, so delete it instead. Replaces the racy find-then-
+    // create/delete pattern that crashed with 500 on a fast double-click.
+    try {
       await this.prisma.pin.create({ data: { messageId, userId, roomId } });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        await this.prisma.pin.deleteMany({ where: { messageId, userId } });
+      } else {
+        throw err;
+      }
     }
 
     const pins = await this.prisma.pin.findMany({
@@ -32,16 +39,20 @@ export class PinsStarsService {
   }
 
   async toggleStar(messageId: string, userId: string, roomId: string): Promise<boolean> {
-    const existing = await this.prisma.star.findUnique({
-      where: { messageId_userId: { messageId, userId } },
-    });
-
-    if (existing) {
-      await this.prisma.star.delete({ where: { id: existing.id } });
-      return false;
-    } else {
+    // Atomic toggle: try to insert (return true). On unique-constraint
+    // violation the row already exists, so delete it (return false).
+    try {
       await this.prisma.star.create({ data: { messageId, userId, roomId } });
       return true;
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        await this.prisma.star.deleteMany({ where: { messageId, userId } });
+        return false;
+      }
+      throw err;
     }
   }
 
