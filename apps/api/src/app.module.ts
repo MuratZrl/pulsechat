@@ -37,6 +37,9 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestLoggerMiddleware).forRoutes('*');
+    // Express 5 deprecated bare '*'; use the named-param '*splat' wildcard
+    // so path-to-regexp v6+ resolves it without the LegacyRouteConverter
+    // emitting a warning on every boot.
+    consumer.apply(RequestLoggerMiddleware).forRoutes('*splat');
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -6,7 +6,16 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PinsStarsService {
   constructor(private prisma: PrismaService) {}
 
+  private async assertMember(userId: string, roomId: string) {
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+  }
+
   async togglePin(roomId: string, messageId: string, userId: string): Promise<string[]> {
+    await this.assertMember(userId, roomId);
+
     // Atomic toggle: try to insert; on unique-constraint violation the row
     // already exists, so delete it instead. Replaces the racy find-then-
     // create/delete pattern that crashed with 500 on a fast double-click.
@@ -30,7 +39,8 @@ export class PinsStarsService {
     return pins.map((p) => p.messageId);
   }
 
-  async getPinnedIds(roomId: string): Promise<string[]> {
+  async getPinnedIds(roomId: string, userId: string): Promise<string[]> {
+    await this.assertMember(userId, roomId);
     const pins = await this.prisma.pin.findMany({
       where: { roomId },
       select: { messageId: true },
@@ -103,6 +113,11 @@ export class PinsStarsService {
       select: { roomId: true },
     });
     if (!msg) return false;
+
+    // Stars are personal but the act of starring still touches a message
+    // the user shouldn't be able to enumerate by id. Require membership.
+    await this.assertMember(userId, msg.roomId);
+
     return this.toggleStar(messageId, userId, msg.roomId);
   }
 }

@@ -8,8 +8,11 @@ export class PinsStarsController {
   constructor(private pinsStarsService: PinsStarsService) {}
 
   @Get('rooms/:roomId/pins')
-  getPins(@Param('roomId') roomId: string) {
-    return this.pinsStarsService.getPinnedIds(roomId);
+  getPins(
+    @Request() req: { user: { id: string } },
+    @Param('roomId') roomId: string,
+  ) {
+    return this.pinsStarsService.getPinnedIds(roomId, req.user.id);
   }
 
   @Post('rooms/:roomId/messages/:messageId/pin')

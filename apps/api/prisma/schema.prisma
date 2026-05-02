@@ -15,6 +15,11 @@ enum RoomType {
 
 model User {
   id            String            @id @default(cuid())
+  // Uniqueness is enforced by a case-insensitive functional index in
+  // migration 20260502010000_unique_user_name (CREATE UNIQUE INDEX
+  // ON "User" (LOWER(name))). Prisma can't natively express functional
+  // indexes via @unique, so this field is intentionally not annotated —
+  // the constraint is real, just lives at the DB level.
   name          String
   email         String            @unique
   passwordHash  String

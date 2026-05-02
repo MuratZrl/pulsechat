@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -49,10 +50,24 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
-    const user = await this.prisma.user.create({
-      data: { name: dto.name, email: dto.email, passwordHash },
-      select: { id: true, name: true, email: true, emailVerified: true },
-    });
+
+    let user: { id: string; name: string; email: string; emailVerified: boolean };
+    try {
+      user = await this.prisma.user.create({
+        data: { name: dto.name, email: dto.email, passwordHash },
+        select: { id: true, name: true, email: true, emailVerified: true },
+      });
+    } catch (err) {
+      // P2002 = unique constraint. Could be name OR email — generic message
+      // so the client can't tell which collided (anti-enumeration).
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Registration could not be completed');
+      }
+      throw err;
+    }
 
     // Auto-join default rooms
     const defaultRooms = await this.prisma.room.findMany({
