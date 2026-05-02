@@ -43,6 +43,11 @@ export class RedisService implements OnModuleDestroy {
     await this.client.expire(key, seconds);
   }
 
+  /** Read-only liveness check — returns 'PONG' on a healthy connection. */
+  async ping(): Promise<string> {
+    return this.client.ping();
+  }
+
   onModuleDestroy() {
     this.client.disconnect();
   }

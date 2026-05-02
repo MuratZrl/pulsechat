@@ -30,8 +30,12 @@ export class HealthController {
         }
       },
       async (): Promise<HealthIndicatorResult> => {
+        // Read-only PING — the previous SET wrote a key with a 10s TTL on
+        // every hit, which churned Redis under any load balancer that
+        // pings frequently.
         try {
-          await this.redis.set('health:ping', 'pong', 10);
+          const result = await this.redis.ping();
+          if (result !== 'PONG') throw new Error('unexpected response');
           return { redis: { status: 'up' } };
         } catch {
           return { redis: { status: 'down' } };
