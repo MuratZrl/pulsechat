@@ -14,4 +14,9 @@ FROM ranked
 WHERE "User".id = ranked.id AND ranked.rn > 1;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_name_key" ON "User"("name");
+-- Functional index on LOWER(name) so the constraint is case-insensitive,
+-- matching the case-insensitive mention lookup in messages.service.ts.
+-- Without LOWER(), "Alex" and "alex" could both pass the unique check yet
+-- both match a single @alex mention — defeating the whole point of the
+-- constraint.
+CREATE UNIQUE INDEX "User_name_key" ON "User" (LOWER(name));
