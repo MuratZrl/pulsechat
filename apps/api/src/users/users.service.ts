@@ -5,10 +5,28 @@ import { PrismaService } from '../prisma/prisma.service';
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
-  async findById(id: string) {
+  /**
+   * Authenticated current-user lookup. Includes email — only the owner of
+   * the account should ever receive their own email back.
+   */
+  async findMe(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: { id: true, name: true, email: true, bio: true, avatarUrl: true, createdAt: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  /**
+   * Public profile lookup by id. Deliberately omits email so any
+   * authenticated user can fetch any other user's display info without
+   * leaking PII (the previous shared findById returned email here too).
+   */
+  async findPublicProfile(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, name: true, bio: true, avatarUrl: true, createdAt: true },
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
