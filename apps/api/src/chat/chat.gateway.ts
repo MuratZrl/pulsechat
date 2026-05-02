@@ -63,6 +63,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.userId = user.id;
       client.userName = user.name;
 
+      // Per-user room — used by direct emits like `mention` so we can target
+      // the user without knowing which sockets they currently have open.
+      await client.join(`user:${user.id}`);
+
       // Auto-join all rooms the user is a member of
       const memberships = await this.prisma.roomMember.findMany({
         where: { userId: user.id },
@@ -131,20 +135,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       this.server.to(roomId).emit('new_message', message);
 
-      // Notify mentioned users
-      if (message.reactions !== undefined) {
-        const mentions = await this.prisma.mention.findMany({
-          where: { messageId: message.id },
-          select: { userId: true },
+      // Notify mentioned users via their per-user room. (The previous
+      // `if (message.reactions !== undefined)` guard was dead code — the
+      // formatter always returns a reactions field — and the emit targeted
+      // a room named after the userId that no socket had joined, so mention
+      // events never reached the client.)
+      const mentions = await this.prisma.mention.findMany({
+        where: { messageId: message.id },
+        select: { userId: true },
+      });
+      for (const { userId } of mentions) {
+        this.server.to(`user:${userId}`).emit('mention', {
+          roomId,
+          messageId: message.id,
+          fromName: client.userName,
+          text: message.text,
         });
-        for (const { userId } of mentions) {
-          this.server.to(userId).emit('mention', {
-            roomId,
-            messageId: message.id,
-            fromName: client.userName,
-            text: message.text,
-          });
-        }
       }
 
       return { success: true, message };
