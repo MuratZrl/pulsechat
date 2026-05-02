@@ -25,7 +25,7 @@ describe('UsersService', () => {
     service = module.get<UsersService>(UsersService);
   });
 
-  describe('findById', () => {
+  describe('findMe', () => {
     const userResult = {
       id: 'u1',
       name: 'Alice',
@@ -35,10 +35,10 @@ describe('UsersService', () => {
       createdAt: new Date('2025-01-01'),
     };
 
-    it('should return a user when found', async () => {
+    it('should return the current user including email', async () => {
       prisma.user.findUnique.mockResolvedValue(userResult);
 
-      const result = await service.findById('u1');
+      const result = await service.findMe('u1');
 
       expect(result).toEqual(userResult);
       expect(prisma.user.findUnique).toHaveBeenCalledWith({
@@ -50,7 +50,36 @@ describe('UsersService', () => {
     it('should throw NotFoundException when user is not found', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.findById('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.findMe('nonexistent')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('findPublicProfile', () => {
+    const publicResult = {
+      id: 'u1',
+      name: 'Alice',
+      bio: 'Hello',
+      avatarUrl: null,
+      createdAt: new Date('2025-01-01'),
+    };
+
+    it('should return a public profile WITHOUT email', async () => {
+      prisma.user.findUnique.mockResolvedValue(publicResult);
+
+      const result = await service.findPublicProfile('u1');
+
+      expect(result).toEqual(publicResult);
+      expect(result).not.toHaveProperty('email');
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        select: { id: true, name: true, bio: true, avatarUrl: true, createdAt: true },
+      });
+    });
+
+    it('should throw NotFoundException when user is not found', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.findPublicProfile('nonexistent')).rejects.toThrow(NotFoundException);
     });
   });
 

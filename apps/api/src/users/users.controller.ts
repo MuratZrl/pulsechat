@@ -10,7 +10,7 @@ export class UsersController {
 
   @Get('me')
   getMe(@Request() req: { user: { id: string } }) {
-    return this.usersService.findById(req.user.id);
+    return this.usersService.findMe(req.user.id);
   }
 
   @Patch('me')
@@ -23,6 +23,6 @@ export class UsersController {
 
   @Get(':id')
   getUser(@Param('id') id: string) {
-    return this.usersService.findById(id);
+    return this.usersService.findPublicProfile(id);
   }
 }
