@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
@@ -213,16 +214,25 @@ export class MessagesService {
     });
     if (!member) throw new ForbiddenException('Not a member of this room');
 
-    const existing = await this.prisma.messageReaction.findUnique({
-      where: { messageId_userId_emoji: { messageId, userId, emoji } },
-    });
-
-    if (existing) {
-      await this.prisma.messageReaction.delete({ where: { id: existing.id } });
-    } else {
+    // Atomic toggle: try to insert; if the unique constraint trips the row
+    // already exists, so delete it instead. The previous find-then-create/
+    // delete was racy — a fast double-click could observe `existing === null`
+    // twice and produce a 500 from the duplicate insert.
+    try {
       await this.prisma.messageReaction.create({
         data: { messageId, userId, emoji },
       });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        await this.prisma.messageReaction.deleteMany({
+          where: { messageId, userId, emoji },
+        });
+      } else {
+        throw err;
+      }
     }
 
     const reactions = await this.prisma.messageReaction.findMany({

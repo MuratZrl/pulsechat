@@ -33,6 +33,16 @@ export class RedisService implements OnModuleDestroy {
     await this.client.del(key);
   }
 
+  /** Atomic increment; returns the new value. Used by rate-limit counters. */
+  async incr(key: string): Promise<number> {
+    return this.client.incr(key);
+  }
+
+  /** Set a TTL (seconds) on an existing key. */
+  async expire(key: string, seconds: number): Promise<void> {
+    await this.client.expire(key, seconds);
+  }
+
   onModuleDestroy() {
     this.client.disconnect();
   }
