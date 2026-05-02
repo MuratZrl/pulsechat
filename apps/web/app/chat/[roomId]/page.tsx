@@ -132,43 +132,62 @@ export default function ChatRoomPage({
   }, [messages]);
 
   // --- Init: fetch messages + room name from API ---
+  // Each fetch is wired to a shared AbortController so that fast room
+  // switches don't let an earlier room's response overwrite the newer
+  // room's state. Cleanup aborts any still-pending requests; fetch rejects
+  // with a DOMException whose name === 'AbortError', which we filter out.
   useEffect(() => {
-    // Fetch initial messages
+    const controller = new AbortController();
+    const { signal } = controller;
+    const isAbort = (err: unknown) =>
+      err instanceof DOMException && err.name === "AbortError";
+
     apiClient
-      .get<PaginatedMessages>(`/rooms/${roomId}/messages?limit=30`)
+      .get<PaginatedMessages>(`/rooms/${roomId}/messages?limit=30`, signal)
       .then(({ messages: initial, hasMore: more }) => {
         setMessages(initial);
         setHasMore(more);
       })
-      .catch(console.error);
+      .catch((err) => {
+        if (!isAbort(err)) console.error(err);
+      });
 
-    // Fetch room info
     apiClient
       .get<{
         id: string;
         name: string;
         type?: "CHANNEL" | "DM";
         members?: { userId: string; role: string }[];
-      }>(`/rooms/${roomId}`)
+      }>(`/rooms/${roomId}`, signal)
       .then((room) => {
         setRoomName(room.name);
         setRoomType(room.type ?? "CHANNEL");
         // Populate in-memory role cache for badge rendering and canInvite checks
         if (room.members) setRoomRoles(roomId, room.members);
       })
-      .catch(() => setRoomName("Unknown Room"));
+      .catch((err) => {
+        if (!isAbort(err)) setRoomName("Unknown Room");
+      });
 
-    // Load pinned IDs from API
     apiClient
-      .get<string[]>(`/rooms/${roomId}/pins`)
+      .get<string[]>(`/rooms/${roomId}/pins`, signal)
       .then(setPinnedIds)
-      .catch(() => {});
+      .catch((err) => {
+        if (!isAbort(err)) {
+          /* silent — pins are non-critical */
+        }
+      });
 
-    // Load starred IDs from API
     apiClient
-      .get<{ messageId: string }[]>(`/stars`)
+      .get<{ messageId: string }[]>(`/stars`, signal)
       .then((entries) => setStarredIds(entries.map((e) => e.messageId)))
-      .catch(() => {});
+      .catch((err) => {
+        if (!isAbort(err)) {
+          /* silent — stars are non-critical */
+        }
+      });
+
+    return () => controller.abort();
   }, [roomId]);
 
   // --- Socket event listeners ---

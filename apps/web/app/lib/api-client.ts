@@ -79,13 +79,21 @@ async function apiFetch<T>(
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
+// All methods accept an optional AbortSignal so callers (e.g. the room page
+// useEffect) can cancel in-flight requests when the user navigates away.
+// fetch handles the signal natively and rejects with a DOMException whose
+// name is 'AbortError' — callers should filter that out of their .catch.
 
 export const apiClient = {
-  get: <T>(path: string) => apiFetch<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body) }),
-  patch: <T>(path: string, body?: unknown) =>
-    apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
-  delete: <T>(path: string, body?: unknown) =>
-    apiFetch<T>(path, { method: 'DELETE', body: body ? JSON.stringify(body) : undefined }),
+  get: <T>(path: string, signal?: AbortSignal) => apiFetch<T>(path, { signal }),
+  post: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
+    apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body), signal }),
+  patch: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
+    apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body), signal }),
+  delete: <T>(path: string, body?: unknown, signal?: AbortSignal) =>
+    apiFetch<T>(path, {
+      method: 'DELETE',
+      body: body ? JSON.stringify(body) : undefined,
+      signal,
+    }),
 };

@@ -1,7 +1,20 @@
-// Lightweight markdown parser — no dependencies
-// Supports: **bold**, *italic*, ~~strikethrough~~, `code`, ```code blocks```, > blockquotes, [links](url)
+// Markdown rendering: marked (CommonMark + GFM) for parsing, DOMPurify for
+// sanitization. The link renderer is overridden so only http(s) URLs become
+// real anchors — the rest fall back to escaped text. This preserves the
+// PR 1 XSS fix on top of marked's grammar.
+
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:"]);
+
+function isSafeHttpUrl(href: string): boolean {
+  try {
+    return ALLOWED_LINK_PROTOCOLS.has(new URL(href).protocol);
+  } catch {
+    return false;
+  }
+}
 
 function escapeHtml(s: string): string {
   return s
@@ -12,77 +25,68 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function isSafeHttpUrl(href: string): boolean {
-  try {
-    const u = new URL(href);
-    return ALLOWED_LINK_PROTOCOLS.has(u.protocol);
-  } catch {
-    return false;
+// Configure marked once, at module load.
+marked.setOptions({
+  gfm: true,
+  breaks: true, // single \n becomes <br>
+});
+
+const renderer = new marked.Renderer();
+
+// Override link to enforce protocol whitelist + emit our existing CSS class.
+// In marked v15+, the renderer receives { href, title, tokens } and exposes
+// `this.parser` for inline rendering of the link text tokens.
+renderer.link = function ({ href, title, tokens }) {
+  const text = this.parser.parseInline(tokens);
+  if (!isSafeHttpUrl(href)) {
+    return `[${text}](${escapeHtml(href)})`;
   }
-}
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+  return `<a class="md-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
+};
+
+// Keep the existing class names so app/globals.css's `.md-pre`, `.md-code`,
+// `.md-quote` rules continue to apply without any CSS changes.
+renderer.code = function ({ text }) {
+  return `<pre class="md-pre"><code>${escapeHtml(text)}</code></pre>`;
+};
+
+renderer.codespan = function ({ text }) {
+  // marked already escapes the text passed to codespan.
+  return `<code class="md-code">${text}</code>`;
+};
+
+renderer.blockquote = function ({ tokens }) {
+  return `<blockquote class="md-quote">${this.parser.parse(tokens)}</blockquote>`;
+};
+
+marked.use({ renderer });
 
 export function parseMarkdown(text: string): string {
-  // Escape HTML
-  let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rawHtml = marked.parse(text, { async: false }) as string;
 
-  // Extract code blocks into placeholders
-  const codeBlocks: string[] = [];
-  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const idx = codeBlocks.length;
-    codeBlocks.push(
-      `<pre class="md-pre"><code>${code.replace(/\n$/, "")}</code></pre>`
-    );
-    return `__CODE_BLOCK_${idx}__`;
+  // DOMPurify needs `window`. During Next's server render, FormattedText is
+  // a client component but the server still pre-renders it with empty data
+  // (chat messages arrive after socket mount), so the unsanitized branch
+  // never sees user content. Once the client mounts, every render goes
+  // through sanitize().
+  if (typeof window === "undefined") return rawHtml;
+
+  // Note: ALLOWED_URI_REGEXP is intentionally NOT set. In DOMPurify v3 it
+  // gets applied to non-URI attributes too (target, rel) and would strip
+  // their values. Protocol filtering happens in two layers without it:
+  //   1. The link renderer's isSafeHttpUrl rejects non-http(s) before HTML
+  //      is generated.
+  //   2. DOMPurify's default URI scheme allowlist still blocks javascript:,
+  //      data:, vbscript: on any href that slipped through (e.g. raw HTML
+  //      in the markdown source).
+  return DOMPurify.sanitize(rawHtml, {
+    ALLOWED_TAGS: [
+      "p", "br", "strong", "em", "del", "code", "pre",
+      "blockquote", "a", "ul", "ol", "li", "mark",
+    ],
+    ALLOWED_ATTR: ["href", "class", "target", "rel", "title"],
   });
-
-  // Extract inline code into placeholders
-  const inlineCodes: string[] = [];
-  html = html.replace(/`([^`\n]+)`/g, (_, code) => {
-    const idx = inlineCodes.length;
-    inlineCodes.push(`<code class="md-code">${code}</code>`);
-    return `__INLINE_CODE_${idx}__`;
-  });
-
-  // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-
-  // Italic
-  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-
-  // Strikethrough
-  html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
-
-  // Links — only http(s) protocols allowed; anything else falls back to escaped plain text
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, url: string) => {
-    if (!isSafeHttpUrl(url)) {
-      return `[${escapeHtml(label)}](${escapeHtml(url)})`;
-    }
-    return `<a class="md-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-  });
-
-  // Blockquotes (lines starting with >)
-  html = html.replace(
-    /^&gt;\s?(.*)$/gm,
-    '<blockquote class="md-quote">$1</blockquote>'
-  );
-
-  // Restore inline code
-  inlineCodes.forEach((code, idx) => {
-    html = html.replace(`__INLINE_CODE_${idx}__`, code);
-  });
-
-  // Restore code blocks
-  codeBlocks.forEach((block, idx) => {
-    html = html.replace(`__CODE_BLOCK_${idx}__`, block);
-  });
-
-  // Convert newlines to <br> (except inside pre blocks)
-  html = html.replace(
-    /(?<!<\/pre>)\n(?!<pre)/g,
-    "<br>"
-  );
-
-  return html;
 }
 
 export function highlightText(html: string, query: string): string {
