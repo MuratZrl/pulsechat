@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { MessagesService } from './messages.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -45,6 +46,7 @@ describe('MessagesService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         delete: jest.fn(),
+        deleteMany: jest.fn(),
       },
       user: {
         findMany: jest.fn(),
@@ -171,7 +173,6 @@ describe('MessagesService', () => {
     it('should add a reaction when none exists', async () => {
       prisma.message.findUnique.mockResolvedValue({ roomId: 'r1' });
       prisma.roomMember.findUnique.mockResolvedValue({ userId: 'u1' });
-      prisma.messageReaction.findUnique.mockResolvedValue(null);
       prisma.messageReaction.create.mockResolvedValue({});
       prisma.messageReaction.findMany.mockResolvedValue([
         { emoji: '👍', userId: 'u1' },
@@ -181,21 +182,37 @@ describe('MessagesService', () => {
 
       expect(result.reactions).toEqual({ '👍': ['u1'] });
       expect(prisma.messageReaction.create).toHaveBeenCalled();
-      expect(prisma.messageReaction.delete).not.toHaveBeenCalled();
+      expect(prisma.messageReaction.deleteMany).not.toHaveBeenCalled();
     });
 
-    it('should remove a reaction when it already exists', async () => {
+    it('should remove a reaction when create raises P2002 (already exists)', async () => {
       prisma.message.findUnique.mockResolvedValue({ roomId: 'r1' });
       prisma.roomMember.findUnique.mockResolvedValue({ userId: 'u1' });
-      prisma.messageReaction.findUnique.mockResolvedValue({ id: 'rx1' });
-      prisma.messageReaction.delete.mockResolvedValue({});
+      prisma.messageReaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+      prisma.messageReaction.deleteMany.mockResolvedValue({ count: 1 });
       prisma.messageReaction.findMany.mockResolvedValue([]);
 
       const result = await service.toggleReaction('m1', 'u1', '👍');
 
       expect(result.reactions).toEqual({});
-      expect(prisma.messageReaction.delete).toHaveBeenCalledWith({ where: { id: 'rx1' } });
-      expect(prisma.messageReaction.create).not.toHaveBeenCalled();
+      expect(prisma.messageReaction.deleteMany).toHaveBeenCalledWith({
+        where: { messageId: 'm1', userId: 'u1', emoji: '👍' },
+      });
+    });
+
+    it('should rethrow non-P2002 errors from create', async () => {
+      prisma.message.findUnique.mockResolvedValue({ roomId: 'r1' });
+      prisma.roomMember.findUnique.mockResolvedValue({ userId: 'u1' });
+      const boom = new Error('connection lost');
+      prisma.messageReaction.create.mockRejectedValue(boom);
+
+      await expect(service.toggleReaction('m1', 'u1', '👍')).rejects.toBe(boom);
+      expect(prisma.messageReaction.deleteMany).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException when message does not exist', async () => {
