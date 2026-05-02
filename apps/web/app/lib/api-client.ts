@@ -4,6 +4,22 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 const ACCESS_TOKEN_KEY = 'chat_access_token';
 const REFRESH_TOKEN_KEY = 'chat_refresh_token';
 
+// Endpoints that should NOT trigger auto-refresh or redirect on 401.
+// These are unauthenticated by design — a 401 here is a normal "wrong
+// credentials" / "invalid token" response and the caller handles it.
+const AUTH_ENDPOINTS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/verify-email',
+];
+
+function isAuthEndpoint(path: string): boolean {
+  return AUTH_ENDPOINTS.some((endpoint) => path.startsWith(endpoint));
+}
+
 // ─── Token helpers ─────────────────────────────────────────────────────────
 
 export function getAccessToken(): string | null {
@@ -46,8 +62,11 @@ async function apiFetch<T>(
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
-  // Auto-refresh on 401
-  if (res.status === 401 && retry) {
+  // Auto-refresh on 401 — but ONLY for authenticated endpoints.
+  // For /auth/login, /auth/register, etc., a 401 means "wrong credentials"
+  // and must be surfaced to the caller as a normal error, not a session
+  // expiry that triggers redirect.
+  if (res.status === 401 && retry && !isAuthEndpoint(path)) {
     const refreshToken = getRefreshToken();
     if (refreshToken) {
       const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
@@ -62,8 +81,20 @@ async function apiFetch<T>(
       }
     }
     clearTokens();
+    // Only redirect if we're NOT already on an auth page. Without this guard,
+    // landing on /login with no token causes a hard reload loop that resets
+    // the page (and DevTools) every time the snackbar appears.
     if (typeof window !== 'undefined') {
-      window.location.href = '/login';
+      const currentPath = window.location.pathname;
+      const isOnAuthPage =
+        currentPath.startsWith('/login') ||
+        currentPath.startsWith('/register') ||
+        currentPath.startsWith('/forgot-password') ||
+        currentPath.startsWith('/reset-password') ||
+        currentPath.startsWith('/verify-email');
+      if (!isOnAuthPage) {
+        window.location.href = '/login';
+      }
     }
     throw new Error('Unauthorized');
   }
