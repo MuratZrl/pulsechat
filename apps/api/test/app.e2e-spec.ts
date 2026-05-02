@@ -107,6 +107,7 @@ describe('App (e2e)', () => {
     set: jest.fn().mockResolvedValue(undefined),
     get: jest.fn().mockResolvedValue(null),
     del: jest.fn().mockResolvedValue(undefined),
+    ping: jest.fn().mockResolvedValue('PONG'),
     onModuleDestroy: jest.fn(),
   };
 
