@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo, use } from "react";
-import { Message, Attachment, Reactions } from "../../types";
+import { Message, Attachment, Reactions, OnlineUser } from "../../types";
 import { ReadReceipt } from "../../lib/read-receipts";
 import { useAuth } from "../../contexts/auth-context";
 import { apiClient } from "../../lib/api-client";
@@ -23,12 +23,6 @@ import { useToast } from "../../components/toast";
 import { canInvite, setRoomRoles } from "../../lib/room-roles";
 import { InviteLinkModal } from "../../components/invite-link-modal";
 import { KeyboardShortcutsModal } from "../../components/keyboard-shortcuts-modal";
-
-interface OnlineUser {
-  id: string;
-  name: string;
-  status: "online" | "idle" | "offline";
-}
 
 interface PaginatedMessages {
   messages: Message[];

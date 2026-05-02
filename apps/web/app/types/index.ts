@@ -5,6 +5,14 @@ export interface User {
   emailVerified?: boolean;
 }
 
+export type UserStatus = "online" | "idle" | "offline";
+
+export interface OnlineUser {
+  id: string;
+  name: string;
+  status: UserStatus;
+}
+
 export interface Room {
   id: string;
   name: string;
