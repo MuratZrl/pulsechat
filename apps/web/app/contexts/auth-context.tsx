@@ -16,16 +16,6 @@ import {
 } from "../lib/api-client";
 import { disconnectSocket } from "../hooks/useSocket";
 
-export type SocialProvider = "google" | "github" | "discord";
-
-export interface SocialLink {
-  provider: SocialProvider;
-  providerUserId: string;
-  providerEmail: string;
-  providerName: string;
-  linkedAt: string;
-}
-
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -42,7 +32,6 @@ interface AuthContextType {
   logout: () => Promise<void>;
   updateProfile: (updates: {
     name?: string;
-    email?: string;
     bio?: string;
     avatarUrl?: string;
   }) => Promise<{ success: boolean; error?: string }>;
@@ -54,23 +43,6 @@ interface AuthContextType {
     password: string
   ) => Promise<{ success: boolean; error?: string }>;
   resendVerification: () => Promise<{ success: boolean; error?: string }>;
-  socialLogin: (
-    provider: SocialProvider,
-    providerUserId: string,
-    providerEmail: string,
-    providerName: string
-  ) => { success: boolean; error?: string };
-  linkSocial: (
-    provider: SocialProvider,
-    providerUserId: string,
-    providerEmail: string,
-    providerName: string
-  ) => { success: boolean; error?: string };
-  unlinkSocial: (provider: SocialProvider) => {
-    success: boolean;
-    error?: string;
-  };
-  getSocialLinks: () => SocialLink[];
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -143,7 +115,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function updateProfile(updates: {
     name?: string;
-    email?: string;
     bio?: string;
     avatarUrl?: string;
   }) {
@@ -206,34 +177,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // ── Stubs for social features (not yet implemented) ─────────────────────────
-
-  function socialLogin(
-    _provider: SocialProvider,
-    _providerUserId: string,
-    _providerEmail: string,
-    _providerName: string
-  ) {
-    return { success: false, error: "Social login not available yet" };
-  }
-
-  function linkSocial(
-    _provider: SocialProvider,
-    _providerUserId: string,
-    _providerEmail: string,
-    _providerName: string
-  ) {
-    return { success: false, error: "Social linking not available yet" };
-  }
-
-  function unlinkSocial(_provider: SocialProvider) {
-    return { success: false, error: "Social unlinking not available yet" };
-  }
-
-  function getSocialLinks(): SocialLink[] {
-    return [];
-  }
-
   return (
     <AuthContext.Provider
       value={{
@@ -246,10 +189,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         changePassword,
         deleteAccount,
         resendVerification,
-        socialLogin,
-        linkSocial,
-        unlinkSocial,
-        getSocialLinks,
       }}
     >
       {children}

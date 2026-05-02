@@ -1,6 +1,6 @@
 "use client";
 
-import { OnlineUser, UserStatus } from "../lib/mock-users";
+import { OnlineUser, UserStatus } from "../types";
 import { Avatar } from "./avatar";
 
 const statusColors: Record<UserStatus, string> = {
