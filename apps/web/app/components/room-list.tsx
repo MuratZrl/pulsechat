@@ -43,9 +43,17 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
     loadRooms();
   }, [loadRooms]);
 
-  // Mark active room as read when navigating
+  // Latest-rooms ref so the mark-read effect can read current state without
+  // depending on `rooms` (which would re-trigger after every setRooms and
+  // relied on the unreadCount==0 short-circuit to avoid an infinite loop —
+  // a fragile pattern that breaks the moment any future change touches
+  // setRooms unconditionally).
+  const roomsRef = useRef<Room[]>([]);
+  roomsRef.current = rooms;
+
+  // Mark active room as read when navigating.
   useEffect(() => {
-    const activeRoom = rooms.find((r) => pathname === `/chat/${r.id}`);
+    const activeRoom = roomsRef.current.find((r) => pathname === `/chat/${r.id}`);
     if (!activeRoom) return;
     if ((activeRoom.unreadCount ?? 0) > 0 || (activeRoom.mentionCount ?? 0) > 0) {
       apiClient.post(`/rooms/${activeRoom.id}/read`, {}).catch(console.error);
@@ -55,7 +63,7 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
         )
       );
     }
-  }, [pathname, rooms]);
+  }, [pathname]);
 
   // Real-time: increment unread count when a new message arrives in another room
   useEffect(() => {
