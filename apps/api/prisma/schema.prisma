@@ -15,7 +15,7 @@ enum RoomType {
 
 model User {
   id            String            @id @default(cuid())
-  name          String
+  name          String            @unique
   email         String            @unique
   passwordHash  String
   bio           String            @default("")

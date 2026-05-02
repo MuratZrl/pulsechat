@@ -5,6 +5,9 @@ export class RegisterDto {
   @IsNotEmpty()
   @MinLength(2)
   @MaxLength(50)
+  @Matches(/^[a-zA-Z0-9_ ]+$/, {
+    message: 'Name can only contain letters, numbers, spaces, and underscores',
+  })
   name: string;
 
   @IsEmail()
