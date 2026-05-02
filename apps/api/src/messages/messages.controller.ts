@@ -33,11 +33,15 @@ export class MessagesController {
     @Query('q') q: string,
     @Query('limit') limit?: string,
   ) {
-    if (!q?.trim()) return [];
+    // Minimum 2 characters: a single-char query degrades to a full-table
+    // LIKE '%x%' scan in Postgres, which is a cheap DoS vector for any
+    // authenticated user. Two chars matches typical search UX too.
+    const trimmed = q?.trim() ?? '';
+    if (trimmed.length < 2) return [];
     return this.messagesService.searchMessages(
       roomId,
       req.user.id,
-      q.trim(),
+      trimmed,
       limit ? parseInt(limit) : 20,
     );
   }

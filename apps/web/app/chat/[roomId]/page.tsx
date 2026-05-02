@@ -332,21 +332,36 @@ export default function ChatRoomPage({
       .catch(() => {});
   }, [messages, roomId]);
 
-  // Emit mark_read for every message from others as soon as we see them
+  // Emit mark_read once per message from others. Without the ref guard,
+  // every state change to `messages` (initial load of 30, every new arrival,
+  // every edit) re-emitted for the entire list — each emit hits the DB via
+  // readReceipt.upsert and broadcasts to the room. That was a 30x amplifier
+  // on initial mount alone.
+  const emittedReadIdsRef = useRef<Set<string>>(new Set());
+
+  // Reset the dedupe set on room change so a fresh room starts fresh.
+  useEffect(() => {
+    emittedReadIdsRef.current = new Set();
+  }, [roomId]);
+
   useEffect(() => {
     if (!socket || !user) return;
-    messages.forEach((msg) => {
-      if (msg.senderId !== user.id) {
-        socket.emit("mark_read", { messageId: msg.id, roomId });
-      }
-    });
+    for (const msg of messages) {
+      if (msg.senderId === user.id) continue;
+      if (emittedReadIdsRef.current.has(msg.id)) continue;
+      socket.emit("mark_read", { messageId: msg.id, roomId });
+      emittedReadIdsRef.current.add(msg.id);
+    }
   }, [messages, socket, user, roomId]);
 
   // --- Search debounce (uses server-side API) ---
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
 
-    if (!searchQuery.trim()) {
+    // Mirror the backend's 2-char minimum so we don't burn round-trips on
+    // queries the API will reject. Clear stale results below the threshold.
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) {
       setSearchResultIds([]);
       setActiveSearchIndex(0);
       return;
@@ -355,7 +370,7 @@ export default function ChatRoomPage({
     searchDebounceRef.current = setTimeout(async () => {
       try {
         const results = await apiClient.get<Message[]>(
-          `/rooms/${roomId}/messages/search?q=${encodeURIComponent(searchQuery.trim())}&limit=20`
+          `/rooms/${roomId}/messages/search?q=${encodeURIComponent(trimmed)}&limit=20`
         );
         // Merge any new messages (not yet in memory) into the message list
         setMessages((prev) => {
