@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PinsStarsService } from './pins-stars.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -26,7 +27,16 @@ describe('PinsStarsService', () => {
       message: {
         findUnique: jest.fn(),
       },
+      roomMember: {
+        findUnique: jest.fn(),
+      },
     };
+    // Default: every test passes the membership guard. Individual tests can
+    // override this to simulate a non-member.
+    prisma.roomMember.findUnique.mockResolvedValue({
+      userId: 'user-1',
+      roomId: 'room-1',
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -86,6 +96,16 @@ describe('PinsStarsService', () => {
       await expect(service.togglePin(roomId, messageId, userId)).rejects.toBe(boom);
       expect(prisma.pin.deleteMany).not.toHaveBeenCalled();
     });
+
+    it('should throw ForbiddenException when the user is not a room member', async () => {
+      prisma.roomMember.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.togglePin(roomId, messageId, userId),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.pin.create).not.toHaveBeenCalled();
+      expect(prisma.pin.deleteMany).not.toHaveBeenCalled();
+    });
   });
 
   // ── getPinnedIds ─────────────────────────────────────────────────────────────
@@ -98,13 +118,22 @@ describe('PinsStarsService', () => {
         { messageId: 'msg-3' },
       ]);
 
-      const result = await service.getPinnedIds('room-1');
+      const result = await service.getPinnedIds('room-1', 'user-1');
 
       expect(prisma.pin.findMany).toHaveBeenCalledWith({
         where: { roomId: 'room-1' },
         select: { messageId: true },
       });
       expect(result).toEqual(['msg-1', 'msg-2', 'msg-3']);
+    });
+
+    it('should throw ForbiddenException when the user is not a room member', async () => {
+      prisma.roomMember.findUnique.mockResolvedValue(null);
+
+      await expect(service.getPinnedIds('room-1', 'user-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.pin.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -293,6 +322,16 @@ describe('PinsStarsService', () => {
       const result = await service.toggleStarLookup('nonexistent', 'user-1');
 
       expect(result).toBe(false);
+      expect(prisma.star.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw ForbiddenException when the user is not a member of the message room', async () => {
+      prisma.message.findUnique.mockResolvedValue({ roomId: 'room-1' });
+      prisma.roomMember.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.toggleStarLookup('msg-1', 'user-1'),
+      ).rejects.toThrow(ForbiddenException);
       expect(prisma.star.create).not.toHaveBeenCalled();
     });
   });

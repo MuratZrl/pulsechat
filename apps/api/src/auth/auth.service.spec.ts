@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
 import { AuthService } from './auth.service';
@@ -216,7 +217,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('should throw ConflictException with a generic message if email already exists', async () => {
+    it('should throw ConflictException with a generic message if email already exists (pre-check)', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
       await expect(service.register(registerDto)).rejects.toThrow(
@@ -226,6 +227,35 @@ describe('AuthService', () => {
         'Registration could not be completed',
       );
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException with the same generic message when create raises P2002 (name or email race)', async () => {
+      // Pre-check passes (no row returned) but the unique constraint trips
+      // at insert — could be a name collision now that User.name is unique,
+      // or an email race between the check and the insert. Either way the
+      // client gets the same message so existence isn't disclosed.
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(service.register(registerDto)).rejects.toThrow(
+        ConflictException,
+      );
+      await expect(service.register(registerDto)).rejects.toThrow(
+        'Registration could not be completed',
+      );
+    });
+
+    it('should rethrow non-P2002 errors from user.create', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      const boom = new Error('connection lost');
+      mockPrisma.user.create.mockRejectedValue(boom);
+
+      await expect(service.register(registerDto)).rejects.toBe(boom);
     });
   });
 
