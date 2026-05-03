@@ -4,6 +4,13 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 const ACCESS_TOKEN_KEY = 'chat_access_token';
 const REFRESH_TOKEN_KEY = 'chat_refresh_token';
 
+// Single-flight refresh promise. The backend rotates refresh tokens with
+// reuse detection: a second call with the now-stale token wipes every
+// refresh row for the user and 401s. So when N requests 401 in parallel
+// we MUST send exactly one /auth/refresh and have all of them await its
+// result, instead of each one independently calling /auth/refresh.
+let refreshPromise: Promise<boolean> | null = null;
+
 // Endpoints that should NOT trigger auto-refresh or redirect on 401.
 // These are unauthenticated by design — a 401 here is a normal "wrong
 // credentials" / "invalid token" response and the caller handles it.
@@ -46,6 +53,41 @@ export function clearTokens() {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
+// ─── Refresh coordination ──────────────────────────────────────────────────
+
+async function performRefresh(): Promise<boolean> {
+  try {
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return false;
+    const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!refreshRes.ok) return false;
+    const data = await refreshRes.json();
+    setTokens(data.accessToken, data.refreshToken);
+    return true;
+  } catch {
+    // Network error, JSON parse error, anything — treat as a failed refresh
+    // so the caller falls through to the logout path.
+    return false;
+  }
+}
+
+function getOrCreateRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+  // The .finally() runs synchronously when the promise settles, BEFORE any
+  // chained .then resumers fire (per spec). That ordering is what makes the
+  // single-flight pattern correct: by the time awaiters wake up and decide
+  // whether to retry, refreshPromise is already null, so the next 401 in a
+  // future expiry window starts a fresh refresh instead of reusing this one.
+  refreshPromise = performRefresh().finally(() => {
+    refreshPromise = null;
+  });
+  return refreshPromise;
+}
+
 // ─── Core fetch wrapper ────────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -67,18 +109,10 @@ async function apiFetch<T>(
   // and must be surfaced to the caller as a normal error, not a session
   // expiry that triggers redirect.
   if (res.status === 401 && retry && !isAuthEndpoint(path)) {
-    const refreshToken = getRefreshToken();
-    if (refreshToken) {
-      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
-      });
-      if (refreshRes.ok) {
-        const data = await refreshRes.json();
-        setTokens(data.accessToken, data.refreshToken);
-        return apiFetch<T>(path, options, false);
-      }
+    const refreshed = await getOrCreateRefresh();
+    if (refreshed) {
+      // retry=false guards against an infinite loop if the retry itself 401s.
+      return apiFetch<T>(path, options, false);
     }
     clearTokens();
     // Only redirect if we're NOT already on an auth page. Without this guard,
