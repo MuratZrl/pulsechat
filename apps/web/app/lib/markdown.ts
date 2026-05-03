@@ -4,7 +4,7 @@
 // PR 1 XSS fix on top of marked's grammar.
 
 import { marked } from "marked";
-import DOMPurify from "dompurify";
+import DOMPurify from "isomorphic-dompurify";
 
 const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -64,13 +64,6 @@ marked.use({ renderer });
 
 export function parseMarkdown(text: string): string {
   const rawHtml = marked.parse(text, { async: false }) as string;
-
-  // DOMPurify needs `window`. During Next's server render, FormattedText is
-  // a client component but the server still pre-renders it with empty data
-  // (chat messages arrive after socket mount), so the unsanitized branch
-  // never sees user content. Once the client mounts, every render goes
-  // through sanitize().
-  if (typeof window === "undefined") return rawHtml;
 
   // Note: ALLOWED_URI_REGEXP is intentionally NOT set. In DOMPurify v3 it
   // gets applied to non-URI attributes too (target, rel) and would strip
