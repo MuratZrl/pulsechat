@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PinsStarsService } from './pins-stars.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -56,6 +60,7 @@ describe('PinsStarsService', () => {
     const userId = 'user-1';
 
     it('should create a pin when none exists and return updated pin ids', async () => {
+      prisma.message.findUnique.mockResolvedValue({ roomId });
       prisma.pin.create.mockResolvedValue({ id: 'pin-1', messageId, userId, roomId });
       prisma.pin.findMany.mockResolvedValue([
         { messageId: 'msg-1' },
@@ -72,6 +77,7 @@ describe('PinsStarsService', () => {
     });
 
     it('should delete the pin when create raises P2002 (already exists)', async () => {
+      prisma.message.findUnique.mockResolvedValue({ roomId });
       prisma.pin.create.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
           code: 'P2002',
@@ -84,12 +90,13 @@ describe('PinsStarsService', () => {
       const result = await service.togglePin(roomId, messageId, userId);
 
       expect(prisma.pin.deleteMany).toHaveBeenCalledWith({
-        where: { messageId, userId },
+        where: { messageId, userId, roomId },
       });
       expect(result).toEqual([]);
     });
 
     it('should rethrow non-P2002 errors from create', async () => {
+      prisma.message.findUnique.mockResolvedValue({ roomId });
       const boom = new Error('connection lost');
       prisma.pin.create.mockRejectedValue(boom);
 
@@ -103,6 +110,26 @@ describe('PinsStarsService', () => {
       await expect(
         service.togglePin(roomId, messageId, userId),
       ).rejects.toThrow(ForbiddenException);
+      expect(prisma.message.findUnique).not.toHaveBeenCalled();
+      expect(prisma.pin.create).not.toHaveBeenCalled();
+      expect(prisma.pin.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the message does not exist', async () => {
+      prisma.message.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.togglePin(roomId, messageId, userId),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.pin.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw BadRequestException when the message belongs to another room', async () => {
+      prisma.message.findUnique.mockResolvedValue({ roomId: 'room-2' });
+
+      await expect(
+        service.togglePin(roomId, messageId, userId),
+      ).rejects.toThrow(BadRequestException);
       expect(prisma.pin.create).not.toHaveBeenCalled();
       expect(prisma.pin.deleteMany).not.toHaveBeenCalled();
     });
