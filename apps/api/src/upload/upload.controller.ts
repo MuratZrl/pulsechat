@@ -8,6 +8,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import { memoryStorage } from 'multer';
 import { fromBuffer as fileTypeFromBuffer } from 'file-type';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -49,6 +50,7 @@ export class UploadController {
   constructor(private readonly r2: R2Service) {}
 
   @Post()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
