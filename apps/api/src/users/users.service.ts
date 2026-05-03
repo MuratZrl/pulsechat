@@ -1,9 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+  ) {}
 
   /**
    * Authenticated current-user lookup. Includes email — only the owner of
@@ -34,12 +44,34 @@ export class UsersService {
 
   async updateProfile(
     id: string,
-    data: { name?: string; bio?: string; avatarUrl?: string },
+    data: { name?: string; bio?: string; avatarUrl?: string | null },
   ) {
-    return this.prisma.user.update({
-      where: { id },
-      data,
-      select: { id: true, name: true, email: true, bio: true, avatarUrl: true, createdAt: true },
-    });
+    // Avatar URL whitelist. `null` and `""` clear the avatar — only non-empty
+    // strings need the prefix check. Trailing slash defeats lookalike domains.
+    if (typeof data.avatarUrl === 'string' && data.avatarUrl.length > 0) {
+      const r2PublicUrl = this.config.getOrThrow<string>('R2_PUBLIC_URL');
+      if (!data.avatarUrl.startsWith(`${r2PublicUrl}/`)) {
+        throw new BadRequestException('Avatar URL is not from an allowed source');
+      }
+    }
+
+    try {
+      return await this.prisma.user.update({
+        where: { id },
+        data,
+        select: { id: true, name: true, email: true, bio: true, avatarUrl: true, createdAt: true },
+      });
+    } catch (err) {
+      // updateProfile only accepts name/bio/avatarUrl, never email — so any
+      // P2002 here is unambiguously a name collision (functional unique index
+      // on LOWER(name)).
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Name is already taken');
+      }
+      throw err;
+    }
   }
 }
