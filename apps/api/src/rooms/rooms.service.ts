@@ -2,6 +2,10 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 
+// Channels joinable through POST /rooms/:id/join without an invite. Every
+// other channel is invite-only; DMs are not joinable through this path at all.
+const PUBLIC_DEFAULTS = new Set(['General', 'Random']);
+
 @Injectable()
 export class RoomsService {
   constructor(private prisma: PrismaService) {}
@@ -119,9 +123,22 @@ export class RoomsService {
     };
   }
 
+  // Channels are invite-only by default. The only ones joinable via this path
+  // are the seeded `General` / `Random` defaults; everything else routes
+  // through joinByInvite. DMs are 2-party by definition and are never joinable
+  // through this endpoint.
   async joinRoom(roomId: string, userId: string) {
-    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      select: { id: true, name: true, type: true },
+    });
     if (!room) throw new NotFoundException('Room not found');
+    if (room.type === 'DM') {
+      throw new ForbiddenException('Direct messages cannot be joined directly');
+    }
+    if (!PUBLIC_DEFAULTS.has(room.name)) {
+      throw new ForbiddenException('This room requires an invite to join');
+    }
     await this.prisma.roomMember.upsert({
       where: { userId_roomId: { userId, roomId } },
       create: { userId, roomId, role: 'member' },
@@ -130,12 +147,28 @@ export class RoomsService {
     return { success: true };
   }
 
+  // Leaving a DM would orphan its history: getOrCreateDm only matches rooms
+  // with both members still present, so the next message between the same
+  // two users would create a fresh DM and the old one becomes unreachable.
   async leaveRoom(roomId: string, userId: string) {
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      select: { type: true },
+    });
+    if (!room) throw new NotFoundException('Room not found');
+    if (room.type === 'DM') {
+      throw new ForbiddenException('Direct messages cannot be left');
+    }
     await this.prisma.roomMember.deleteMany({ where: { userId, roomId } });
     return { success: true };
   }
 
   async markRead(roomId: string, userId: string) {
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+
     await this.prisma.roomMember.update({
       where: { userId_roomId: { userId, roomId } },
       data: { lastReadAt: new Date() },
@@ -214,6 +247,15 @@ export class RoomsService {
   }
 
   async generateInvite(roomId: string, userId: string) {
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      select: { type: true },
+    });
+    if (!room) throw new NotFoundException('Room not found');
+    if (room.type === 'DM') {
+      throw new ForbiddenException('Direct messages cannot have invite links');
+    }
+
     const member = await this.prisma.roomMember.findUnique({
       where: { userId_roomId: { userId, roomId } },
     });
@@ -247,6 +289,11 @@ export class RoomsService {
       include: { room: { select: { id: true, name: true, type: true } } },
     });
     if (!invite) throw new NotFoundException('Invalid or expired invite code');
+    // Reuse the unknown-code message so a probe can't tell whether the code
+    // exists but points at a DM.
+    if (invite.room.type === 'DM') {
+      throw new NotFoundException('Invalid or expired invite code');
+    }
 
     await this.prisma.roomMember.upsert({
       where: { userId_roomId: { userId, roomId: invite.roomId } },
