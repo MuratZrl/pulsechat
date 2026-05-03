@@ -17,7 +17,11 @@ describe('RoomsService', () => {
       roomMember: {
         findUnique: jest.fn(),
         upsert: jest.fn(),
+        update: jest.fn(),
         deleteMany: jest.fn(),
+      },
+      mention: {
+        updateMany: jest.fn(),
       },
       roomInvite: {
         create: jest.fn(),
@@ -123,8 +127,12 @@ describe('RoomsService', () => {
   // ── joinRoom ────────────────────────────────────────────────────────────────
 
   describe('joinRoom', () => {
-    it('should upsert membership and return success', async () => {
-      prisma.room.findUnique.mockResolvedValue({ id: 'r1' });
+    it('should upsert membership for the public-default General room', async () => {
+      prisma.room.findUnique.mockResolvedValue({
+        id: 'r1',
+        name: 'General',
+        type: 'GROUP',
+      });
       prisma.roomMember.upsert.mockResolvedValue({});
 
       const result = await service.joinRoom('r1', 'u1');
@@ -142,12 +150,35 @@ describe('RoomsService', () => {
 
       await expect(service.joinRoom('bad', 'u1')).rejects.toThrow(NotFoundException);
     });
+
+    it('should throw ForbiddenException when room is a DM', async () => {
+      prisma.room.findUnique.mockResolvedValue({
+        id: 'dm1',
+        name: 'u1__u2',
+        type: 'DM',
+      });
+
+      await expect(service.joinRoom('dm1', 'u3')).rejects.toThrow(ForbiddenException);
+      expect(prisma.roomMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it('should throw ForbiddenException for non-public channels (invite-only)', async () => {
+      prisma.room.findUnique.mockResolvedValue({
+        id: 'r1',
+        name: 'private-team',
+        type: 'GROUP',
+      });
+
+      await expect(service.joinRoom('r1', 'u1')).rejects.toThrow(ForbiddenException);
+      expect(prisma.roomMember.upsert).not.toHaveBeenCalled();
+    });
   });
 
   // ── leaveRoom ───────────────────────────────────────────────────────────────
 
   describe('leaveRoom', () => {
-    it('should delete membership and return success', async () => {
+    it('should delete membership and return success for a channel', async () => {
+      prisma.room.findUnique.mockResolvedValue({ type: 'GROUP' });
       prisma.roomMember.deleteMany.mockResolvedValue({ count: 1 });
 
       const result = await service.leaveRoom('r1', 'u1');
@@ -156,6 +187,42 @@ describe('RoomsService', () => {
       expect(prisma.roomMember.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'u1', roomId: 'r1' },
       });
+    });
+
+    it('should throw NotFoundException when room does not exist', async () => {
+      prisma.room.findUnique.mockResolvedValue(null);
+
+      await expect(service.leaveRoom('bad', 'u1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw ForbiddenException when leaving a DM', async () => {
+      prisma.room.findUnique.mockResolvedValue({ type: 'DM' });
+
+      await expect(service.leaveRoom('dm1', 'u1')).rejects.toThrow(ForbiddenException);
+      expect(prisma.roomMember.deleteMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── markRead ────────────────────────────────────────────────────────────────
+
+  describe('markRead', () => {
+    it('should update lastReadAt and clear unread mentions for a member', async () => {
+      prisma.roomMember.findUnique.mockResolvedValue({ userId: 'u1', roomId: 'r1' });
+      prisma.roomMember.update.mockResolvedValue({});
+      prisma.mention.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await service.markRead('r1', 'u1');
+
+      expect(result).toEqual({ success: true });
+      expect(prisma.roomMember.update).toHaveBeenCalled();
+      expect(prisma.mention.updateMany).toHaveBeenCalled();
+    });
+
+    it('should throw ForbiddenException when caller is not a member', async () => {
+      prisma.roomMember.findUnique.mockResolvedValue(null);
+
+      await expect(service.markRead('r1', 'stranger')).rejects.toThrow(ForbiddenException);
+      expect(prisma.roomMember.update).not.toHaveBeenCalled();
     });
   });
 
@@ -188,6 +255,7 @@ describe('RoomsService', () => {
 
   describe('generateInvite', () => {
     it('should generate an invite code for an admin', async () => {
+      prisma.room.findUnique.mockResolvedValue({ type: 'GROUP' });
       prisma.roomMember.findUnique.mockResolvedValue({ role: 'admin' });
       prisma.roomInvite.deleteMany.mockResolvedValue({});
       prisma.roomInvite.create.mockResolvedValue({ code: 'abc123' });
@@ -197,13 +265,28 @@ describe('RoomsService', () => {
       expect(result).toEqual({ code: 'abc123' });
     });
 
+    it('should throw NotFoundException when room does not exist', async () => {
+      prisma.room.findUnique.mockResolvedValue(null);
+
+      await expect(service.generateInvite('bad', 'u1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw ForbiddenException when room is a DM', async () => {
+      prisma.room.findUnique.mockResolvedValue({ type: 'DM' });
+
+      await expect(service.generateInvite('dm1', 'u1')).rejects.toThrow(ForbiddenException);
+      expect(prisma.roomInvite.create).not.toHaveBeenCalled();
+    });
+
     it('should throw ForbiddenException when user is not a member', async () => {
+      prisma.room.findUnique.mockResolvedValue({ type: 'GROUP' });
       prisma.roomMember.findUnique.mockResolvedValue(null);
 
       await expect(service.generateInvite('r1', 'u1')).rejects.toThrow(ForbiddenException);
     });
 
     it('should throw ForbiddenException when user has member role', async () => {
+      prisma.room.findUnique.mockResolvedValue({ type: 'GROUP' });
       prisma.roomMember.findUnique.mockResolvedValue({ role: 'member' });
 
       await expect(service.generateInvite('r1', 'u1')).rejects.toThrow(ForbiddenException);
@@ -229,6 +312,16 @@ describe('RoomsService', () => {
       prisma.roomInvite.findUnique.mockResolvedValue(null);
 
       await expect(service.joinByInvite('bad', 'u1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw NotFoundException when invite points at a DM', async () => {
+      prisma.roomInvite.findUnique.mockResolvedValue({
+        roomId: 'dm1',
+        room: { id: 'dm1', name: 'u1__u2', type: 'DM' },
+      });
+
+      await expect(service.joinByInvite('abc123', 'u3')).rejects.toThrow(NotFoundException);
+      expect(prisma.roomMember.upsert).not.toHaveBeenCalled();
     });
   });
 });
