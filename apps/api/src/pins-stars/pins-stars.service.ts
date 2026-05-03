@@ -1,4 +1,9 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -16,6 +21,18 @@ export class PinsStarsService {
   async togglePin(roomId: string, messageId: string, userId: string): Promise<string[]> {
     await this.assertMember(userId, roomId);
 
+    // Membership confirms the caller belongs to the URL's room, but the
+    // messageId is also client-controlled. Without this check, a member of
+    // both R1 and R2 could pin an R2 message into R1's pinned list.
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { roomId: true },
+    });
+    if (!message) throw new NotFoundException('Message not found');
+    if (message.roomId !== roomId) {
+      throw new BadRequestException('Message does not belong to this room');
+    }
+
     // Atomic toggle: try to insert; on unique-constraint violation the row
     // already exists, so delete it instead. Replaces the racy find-then-
     // create/delete pattern that crashed with 500 on a fast double-click.
@@ -26,7 +43,7 @@ export class PinsStarsService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        await this.prisma.pin.deleteMany({ where: { messageId, userId } });
+        await this.prisma.pin.deleteMany({ where: { messageId, userId, roomId } });
       } else {
         throw err;
       }
