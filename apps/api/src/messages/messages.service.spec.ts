@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { MessagesService } from './messages.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -60,6 +61,12 @@ describe('MessagesService', () => {
       providers: [
         MessagesService,
         { provide: PrismaService, useValue: prisma },
+        {
+          provide: ConfigService,
+          useValue: {
+            getOrThrow: jest.fn().mockReturnValue('https://test-r2.example'),
+          },
+        },
       ],
     }).compile();
 
