@@ -116,9 +116,11 @@ export class MessagesController {
 
   @Get('rooms/:roomId/receipts')
   getReceipts(
+    @Request() req: { user: { id: string } },
+    @Param('roomId') roomId: string,
     @Query('ids') ids: string,
   ) {
     const messageIds = ids ? ids.split(',').filter(Boolean) : [];
-    return this.messagesService.getReceipts(messageIds);
+    return this.messagesService.getReceipts(roomId, req.user.id, messageIds);
   }
 }

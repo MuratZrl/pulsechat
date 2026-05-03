@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -268,12 +269,28 @@ export class MessagesService {
   }
 
   async getReceipts(
+    roomId: string,
+    userId: string,
     messageIds: string[],
   ): Promise<Record<string, { userId: string; userName: string; readAt: string }[]>> {
+    // Cap up front so a huge crafted list can't blow up the IN clause before
+    // the membership check runs.
+    if (messageIds.length > 200) {
+      throw new BadRequestException('Too many message ids');
+    }
+
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+
     if (!messageIds.length) return {};
 
+    // Second authorization layer: even a member of R1 can pass message ids
+    // that belong to R2. The `message: { roomId }` filter silently drops
+    // those instead of leaking who-read-what across rooms.
     const receipts = await this.prisma.readReceipt.findMany({
-      where: { messageId: { in: messageIds } },
+      where: { messageId: { in: messageIds }, message: { roomId } },
       include: { user: { select: { id: true, name: true } } },
     });
 
