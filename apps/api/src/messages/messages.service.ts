@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMessageDto } from './dto/create-message.dto';
@@ -13,7 +14,10 @@ type ReactionMap = Record<string, string[]>; // emoji -> userIds
 
 @Injectable()
 export class MessagesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+  ) {}
 
   private buildReactionMap(
     reactions: { emoji: string; userId: string }[],
@@ -123,6 +127,29 @@ export class MessagesService {
       where: { userId_roomId: { userId, roomId } },
     });
     if (!member) throw new ForbiddenException('Not a member of this room');
+
+    // Attachment URL whitelist. Trailing slash is required so a lookalike
+    // domain (e.g. https://my-r2-evil.com) can't squeak past a bare prefix
+    // match against https://my-r2.com.
+    if (dto.attachment?.url) {
+      const r2PublicUrl = this.config.getOrThrow<string>('R2_PUBLIC_URL');
+      if (!dto.attachment.url.startsWith(`${r2PublicUrl}/`)) {
+        throw new BadRequestException('Attachment URL is not from an allowed source');
+      }
+    }
+
+    // Cross-room reply check — without this, a member of R1 could quote a
+    // private R2 message and the reply preview would render R2 content in R1.
+    if (dto.replyToId) {
+      const replyTarget = await this.prisma.message.findUnique({
+        where: { id: dto.replyToId },
+        select: { roomId: true, isDeleted: true },
+      });
+      if (!replyTarget) throw new NotFoundException('Reply target not found');
+      if (replyTarget.roomId !== roomId) {
+        throw new BadRequestException('Cannot reply to a message from another room');
+      }
+    }
 
     const message = await this.prisma.message.create({
       data: {
