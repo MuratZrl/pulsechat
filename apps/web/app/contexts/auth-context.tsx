@@ -153,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function deleteAccount(password: string) {
     try {
       await apiClient.delete("/auth/account", { password });
-      logout();
+      await logout();
       return { success: true };
     } catch (e: unknown) {
       return {
