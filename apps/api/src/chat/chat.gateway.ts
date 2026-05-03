@@ -66,6 +66,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return count <= limit;
   }
 
+  private async assertMember(userId: string, roomId: string): Promise<void> {
+    if (!roomId || typeof roomId !== 'string') {
+      throw new WsException('Invalid roomId');
+    }
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+    });
+    if (!member) {
+      throw new WsException('Not a member of this room');
+    }
+  }
+
   async handleConnection(client: AuthSocket) {
     try {
       const token =
@@ -136,6 +148,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { roomId: string },
   ) {
+    // Rate-limit before the DB lookup so a spammy client can't force a query
+    // per emit.
+    if (!(await this.checkRateLimit(client.userId, 'join', 30))) {
+      throw new WsException('Rate limit exceeded — slow down');
+    }
+    await this.assertMember(client.userId, data.roomId);
     await client.join(data.roomId);
     await this.emitRoomUsers(data.roomId);
   }
@@ -145,6 +163,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { roomId: string },
   ) {
+    // No assertMember: leaving must succeed even after the user was removed
+    // from RoomMember (HTTP leaveRoom or kick) so the socket can still detach.
+    if (!data.roomId || typeof data.roomId !== 'string') return;
     await client.leave(data.roomId);
   }
 
@@ -265,6 +286,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { messageId: string; roomId: string },
   ) {
+    // Read receipts are best-effort UX — a fast scroll can legitimately trip
+    // the limiter, so silently drop instead of throwing.
+    if (!(await this.checkRateLimit(client.userId, 'read', 120))) return;
+    if (!data.messageId || !data.roomId) return;
+    await this.assertMember(client.userId, data.roomId);
+    const message = await this.prisma.message.findUnique({
+      where: { id: data.messageId },
+      select: { roomId: true },
+    });
+    if (!message || message.roomId !== data.roomId) {
+      throw new WsException('Message does not belong to this room');
+    }
     await this.prisma.readReceipt.upsert({
       where: { messageId_userId: { messageId: data.messageId, userId: client.userId } },
       create: { messageId: data.messageId, userId: client.userId },
@@ -279,10 +312,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('typing_start')
-  handleTypingStart(
+  async handleTypingStart(
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { roomId: string },
   ) {
+    // Silent drop on limit — typing pings are noisy and non-critical.
+    if (!(await this.checkRateLimit(client.userId, 'typing', 60))) return;
+    await this.assertMember(client.userId, data.roomId);
     client.to(data.roomId).emit('user_typing', {
       roomId: data.roomId,
       userId: client.userId,
@@ -291,10 +327,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('typing_stop')
-  handleTypingStop(
+  async handleTypingStop(
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: { roomId: string },
   ) {
+    // No assertMember: typing_stop is a cleanup signal that must broadcast
+    // even if the user was just kicked while typing.
+    if (!data.roomId || typeof data.roomId !== 'string') return;
     client.to(data.roomId).emit('user_stop_typing', {
       roomId: data.roomId,
       userId: client.userId,
