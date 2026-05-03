@@ -1,11 +1,24 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { RedisIoAdapter } from './adapters/redis-io.adapter';
 
 type CorsOriginCallback = (err: Error | null, allow?: boolean) => void;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Wire the socket.io Redis adapter BEFORE app.listen so the gateway boots
+  // with cross-replica pub/sub instead of the in-memory default.
+  const ioAdapter = new RedisIoAdapter(app);
+  await ioAdapter.connectToRedis();
+  app.useWebSocketAdapter(ioAdapter);
+
+  // Quit the dedicated pub/sub clients on shutdown. RedisService cleans up its
+  // own client via OnModuleDestroy; this hook covers the adapter's pair.
+  process.on('SIGTERM', () => {
+    void ioAdapter.disconnect();
+  });
 
   // Global validation
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
