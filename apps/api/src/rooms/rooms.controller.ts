@@ -8,6 +8,7 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { RoomsService } from './rooms.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -23,6 +24,7 @@ export class RoomsController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   createRoom(
     @Request() req: { user: { id: string } },
     @Body() dto: CreateRoomDto,
