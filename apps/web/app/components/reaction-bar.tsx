@@ -1,9 +1,6 @@
 "use client";
 
-import { useState } from "react";
 import { Reactions } from "../types";
-
-const QUICK_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "👀"];
 
 interface ReactionBarProps {
   reactions: Reactions;
@@ -12,60 +9,41 @@ interface ReactionBarProps {
 }
 
 export function ReactionBar({ reactions, currentUserId, onToggle }: ReactionBarProps) {
-  const [showPicker, setShowPicker] = useState(false);
   const entries = Object.entries(reactions);
 
+  // Render nothing when there are no reactions. The add-reaction picker now
+  // lives in the floating MessageActions menu, so the row doesn't carry an
+  // invisible 24px button + 4px margin on every message.
+  if (entries.length === 0) return null;
+
   return (
-    <div className="flex flex-wrap items-center gap-1 mt-1">
+    <div className="mt-1 flex flex-wrap items-center gap-1">
       {entries.map(([emoji, userIds]) => {
         const hasReacted = userIds.includes(currentUserId);
         return (
           <button
             key={emoji}
             onClick={() => onToggle(emoji)}
-            className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs transition-colors ${
+            // `border-transparent` on the unreacted state keeps the pill the
+            // same height (22px) as the reacted variant — without it, toggling
+            // a reaction would shift the row by 2px when the border appears.
+            className={`inline-flex cursor-pointer items-center gap-1 rounded-md border px-1.5 py-0.5 transition-colors duration-100 ${
               hasReacted
-                ? "border-indigo-500/50 bg-indigo-500/10 text-text-primary"
-                : "border-border bg-hover text-text-secondary hover:border-border hover:text-text-primary"
+                ? "border-brand/40 bg-brand/15 hover:bg-brand/25"
+                : "border-transparent bg-hover/60 hover:bg-hover"
             }`}
           >
-            <span>{emoji}</span>
-            <span>{userIds.length}</span>
+            <span className="text-sm leading-none">{emoji}</span>
+            <span
+              className={`text-xs font-medium ${
+                hasReacted ? "text-brand" : "text-text-secondary"
+              }`}
+            >
+              {userIds.length}
+            </span>
           </button>
         );
       })}
-
-      {/* Add reaction button */}
-      <div className="relative">
-        <button
-          onClick={() => setShowPicker((p) => !p)}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-full text-text-secondary opacity-0 transition-opacity group-hover:opacity-100 hover:bg-hover hover:text-text-primary"
-          title="Add reaction"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-            <line x1="9" y1="9" x2="9.01" y2="9" />
-            <line x1="15" y1="9" x2="15.01" y2="9" />
-          </svg>
-        </button>
-        {showPicker && (
-          <div className="absolute bottom-full left-0 mb-1 flex gap-1 rounded-lg border border-border bg-sidebar p-1.5 shadow-lg">
-            {QUICK_EMOJIS.map((emoji) => (
-              <button
-                key={emoji}
-                onClick={() => {
-                  onToggle(emoji);
-                  setShowPicker(false);
-                }}
-                className="flex h-7 w-7 items-center justify-center rounded hover:bg-hover text-sm"
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

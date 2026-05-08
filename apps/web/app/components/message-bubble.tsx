@@ -18,6 +18,7 @@ import { getUserRole } from "../lib/room-roles";
 interface MessageBubbleProps {
   message: Message;
   isOwn: boolean;
+  isGrouped?: boolean;
   currentUserId: string;
   roomId: string;
   onEdit: (messageId: string, newText: string) => void;
@@ -39,6 +40,7 @@ interface MessageBubbleProps {
 export function MessageBubble({
   message,
   isOwn,
+  isGrouped = false,
   currentUserId,
   roomId,
   onEdit,
@@ -98,34 +100,67 @@ export function MessageBubble({
     setIsEditing(false);
   };
 
-  // Deleted message
+  // Discord-style row: edge-to-edge hover, fixed avatar gutter, content fills
+  // the rest of the chat width. `py-px` keeps grouped messages tight (~2px),
+  // `mt-4` on the first row of a new group restores ~17px between groups.
+  const rowClass = `group relative flex gap-3 px-4 py-px hover:bg-hover/30 ${
+    isGrouped ? "" : "mt-4"
+  }`;
+
+  const Gutter = () =>
+    isGrouped ? (
+      <div className="w-10 flex-shrink-0 pt-[3px] text-right pr-1">
+        <span
+          className="text-[10px] leading-none text-text-secondary opacity-0 transition-opacity group-hover:opacity-100"
+          title={fullTimestamp}
+        >
+          {time}
+        </span>
+      </div>
+    ) : (
+      <button
+        onClick={(e) => onAvatarClick(e, message.senderId, message.senderName)}
+        className="flex w-10 flex-shrink-0 cursor-pointer pt-0.5"
+        aria-label={`Open ${message.senderName}'s profile`}
+      >
+        <Avatar name={message.senderName} size="md" />
+      </button>
+    );
+
+  // Deleted message — same Discord row, italic placeholder in place of text.
   if (message.isDeleted) {
     return (
-      <div className={`flex items-end gap-2 ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
-        <Avatar name={message.senderName} size="sm" />
-        <div className={`max-w-[70%] ${isOwn ? "text-right" : "text-left"}`}>
-          <div className="inline-block rounded-lg px-3 py-2 text-left bg-hover/50">
-            <p className="text-sm italic text-text-secondary">
-              This message was deleted
-            </p>
-          </div>
+      <div className={rowClass}>
+        <Gutter />
+        <div className="min-w-0 flex-1">
+          {!isGrouped && (
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-medium text-text-primary">
+                {message.senderName}
+              </span>
+              <RoleBadge role={getUserRole(roomId, message.senderId)} />
+              <span
+                className="text-[10px] text-text-secondary"
+                title={fullTimestamp}
+              >
+                {time}
+              </span>
+            </div>
+          )}
+          <p className="text-sm italic text-text-secondary">
+            This message was deleted
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div
-      className={`group relative flex items-end gap-2 ${isOwn ? "flex-row-reverse" : "flex-row"}`}
-    >
-      <button
-        onClick={(e) => onAvatarClick(e, message.senderId, message.senderName)}
-        className="flex-shrink-0 cursor-pointer"
-      >
-        <Avatar name={message.senderName} size="sm" />
-      </button>
-      <div className={`max-w-[70%] ${isOwn ? "text-right" : "text-left"}`}>
-        {/* Actions menu */}
+    <div className={rowClass}>
+      <Gutter />
+
+      <div className="min-w-0 flex-1">
+        {/* Floating action menu — anchored to the row's right edge */}
         <MessageActions
           isOwn={isOwn}
           isPinned={pinned}
@@ -138,131 +173,211 @@ export function MessageBubble({
           onPin={() => onPin(message.id)}
           onForward={onForward}
           onStar={onStar}
+          onToggleReaction={
+            onToggleReaction
+              ? (emoji: string) => onToggleReaction(message.id, emoji)
+              : undefined
+          }
           isStarred={isStarred}
         />
 
-        <div
-          className={`inline-block rounded-lg px-3 py-2 text-left ${
-            isOwn ? "bg-indigo-600 text-white" : "bg-hover text-text-primary"
-          }`}
-        >
-          {/* Forwarded label */}
-          {message.forwarded && (
-            <p className="mb-0.5 flex items-center gap-1 text-[10px] italic text-text-secondary">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m15 17 5-5-5-5" />
-                <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
-              </svg>
-              Forwarded from #{message.forwarded.originalRoom}
-            </p>
-          )}
-
-          {!isOwn && (
-            <p className="mb-0.5 flex items-center text-xs font-medium text-indigo-400">
-              {message.senderName}
-              <RoleBadge role={getUserRole(roomId, message.senderId)} />
-            </p>
-          )}
-
-          {/* Reply quote — uses server-provided replyTo preview */}
-          {message.replyToId && <ReplyQuote replyTo={message.replyTo ?? null} />}
-
-          {/* Message text or edit mode */}
-          {isEditing ? (
-            <div className="space-y-1">
-              <input
-                type="text"
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveEdit();
-                  if (e.key === "Escape") handleCancelEdit();
-                }}
-                autoFocus
-                className="w-full rounded border border-border bg-input px-2 py-1 text-sm text-text-primary focus:border-indigo-500 focus:outline-none"
-              />
-              <div className="flex gap-1">
-                <button
-                  onClick={handleSaveEdit}
-                  className="rounded px-2 py-0.5 text-[10px] font-medium text-white bg-indigo-500 hover:bg-indigo-400"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={handleCancelEdit}
-                  className="rounded px-2 py-0.5 text-[10px] text-text-secondary hover:text-text-primary"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <FormattedText text={message.text} className="text-sm break-words" highlightQuery={searchQuery} />
-          )}
-
-          {/* Attachment */}
-          {message.attachment && message.attachment.type === "voice" ? (
-            <VoicePlayer attachment={message.attachment} isOwn={isOwn} />
-          ) : message.attachment && message.attachment.size === "GIF" ? (
-            <div
-              className="mt-1 flex h-24 w-40 items-center justify-center rounded-md text-3xl"
-              style={{ backgroundColor: message.attachment.url || "#6366f1" }}
+        {!isGrouped && (
+          <div className="flex flex-wrap items-baseline gap-2 leading-tight">
+            <button
+              onClick={(e) => onAvatarClick(e, message.senderId, message.senderName)}
+              className="text-sm font-medium text-text-primary hover:underline"
             >
-              {message.attachment.name?.includes("Heart") || message.attachment.name?.includes("Love")
-                ? "❤️"
-                : message.attachment.name?.includes("Party") || message.attachment.name?.includes("Confetti")
-                ? "🎉"
-                : "😂"}
-            </div>
-          ) : message.attachment ? (
-            <AttachmentCard attachment={message.attachment} isOwn={isOwn} />
-          ) : null}
-
-          {/* Link preview */}
-          {!isEditing && !message.attachment && (() => {
-            const urls = extractUrls(message.text);
-            if (urls.length === 0) return null;
-            const preview = getLinkPreview(urls[0]);
-            return <LinkPreviewCard preview={preview} isOwn={isOwn} />;
-          })()}
-
-          {/* Timestamp + indicators */}
-          <div
-            className={`group/time relative mt-1 flex items-center justify-end gap-1 text-[10px] ${
-              isOwn ? "text-indigo-200" : "text-text-secondary"
-            }`}
-          >
-            {message.editedAt && <span>(edited)</span>}
+              {message.senderName}
+            </button>
+            <RoleBadge role={getUserRole(roomId, message.senderId)} />
+            <span
+              className="text-[10px] text-text-secondary"
+              title={fullTimestamp}
+            >
+              {time}
+            </span>
+            {message.editedAt && (
+              <span className="text-[10px] text-text-secondary">(edited)</span>
+            )}
             {isStarred && (
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" className="text-yellow-400">
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="text-yellow-400"
+              >
                 <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
               </svg>
             )}
             {pinned && (
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-text-secondary"
+              >
                 <path d="M12 17v5" />
                 <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V5a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v5.76z" />
               </svg>
             )}
-            <span className="cursor-default">{time}</span>
-            {/* Full timestamp tooltip on hover */}
-            <span className={`pointer-events-none absolute -top-8 whitespace-nowrap rounded-md bg-foreground/90 px-2 py-1 text-[10px] font-medium text-background opacity-0 shadow-lg transition-opacity group-hover/time:opacity-100 ${isOwn ? "right-0" : "left-0"}`}>
-              {fullTimestamp}
-            </span>
-            {isOwn && <ReadReceiptIndicator receipts={readReceipts || []} />}
           </div>
-        </div>
+        )}
+
+        {/* Forwarded label */}
+        {message.forwarded && (
+          <p className="flex items-center gap-1 text-[10px] italic text-text-secondary">
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m15 17 5-5-5-5" />
+              <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+            </svg>
+            Forwarded from #{message.forwarded.originalRoom}
+          </p>
+        )}
+
+        {/* Reply quote */}
+        {message.replyToId && <ReplyQuote replyTo={message.replyTo ?? null} />}
+
+        {/* Message text or edit mode. The text container is a plain block so
+            it inherits the full content-column width — no flex wrapper that
+            could cap the FormattedText span's wrap point. */}
+        {isEditing ? (
+          <div className="space-y-1">
+            <input
+              type="text"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSaveEdit();
+                if (e.key === "Escape") handleCancelEdit();
+              }}
+              autoFocus
+              className="w-full rounded border border-border bg-input px-2 py-1 text-sm text-text-primary focus:border-indigo-500 focus:outline-none"
+            />
+            <div className="flex gap-1">
+              <button
+                onClick={handleSaveEdit}
+                className="rounded bg-indigo-500 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-indigo-400"
+              >
+                Save
+              </button>
+              <button
+                onClick={handleCancelEdit}
+                className="rounded px-2 py-0.5 text-[10px] text-text-secondary hover:text-text-primary"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          message.text && (
+            <div className="text-sm leading-snug text-text-primary break-words">
+              {/* `[&>p]:m-0` strips marked's default 1em paragraph margins
+                  (~14px top + 14px bottom at text-sm) which were inflating
+                  every grouped row. `[&>p+p]:mt-1.5` keeps a 6px gap
+                  between paragraphs in multi-paragraph messages. */}
+              <FormattedText
+                text={message.text}
+                className="text-sm break-words text-text-primary [&>p]:m-0 [&>p+p]:mt-1.5"
+                highlightQuery={searchQuery}
+              />
+              {isGrouped && message.editedAt && (
+                <span className="ml-1 text-[10px] text-text-secondary">
+                  (edited)
+                </span>
+              )}
+            </div>
+          )
+        )}
+
+        {/* Attachment — pass isOwn=false so styling stays uniform */}
+        {message.attachment && message.attachment.type === "voice" ? (
+          <VoicePlayer attachment={message.attachment} isOwn={false} />
+        ) : message.attachment && message.attachment.size === "GIF" ? (
+          message.attachment.url?.startsWith("http") ? (
+            // Real GIF (GIPHY) — render as an image.
+            <img
+              src={message.attachment.url}
+              alt={message.attachment.name || "GIF"}
+              loading="lazy"
+              className="mt-1 max-h-64 max-w-xs rounded-md object-contain"
+            />
+          ) : (
+            // Legacy fallback for messages stored before the GIPHY swap, when
+            // attachment.url held a hex color rather than a real URL.
+            <div
+              className="mt-1 flex h-24 w-40 items-center justify-center rounded-md text-3xl"
+              style={{ backgroundColor: message.attachment.url || "#6366f1" }}
+            >
+              {message.attachment.name?.includes("Heart") ||
+              message.attachment.name?.includes("Love")
+                ? "❤️"
+                : message.attachment.name?.includes("Party") ||
+                    message.attachment.name?.includes("Confetti")
+                  ? "🎉"
+                  : "😂"}
+            </div>
+          )
+        ) : message.attachment ? (
+          <AttachmentCard attachment={message.attachment} isOwn={false} />
+        ) : null}
+
+        {/* Link preview */}
+        {!isEditing &&
+          !message.attachment &&
+          (() => {
+            const urls = extractUrls(message.text);
+            if (urls.length === 0) return null;
+            const preview = getLinkPreview(urls[0]);
+            return <LinkPreviewCard preview={preview} isOwn={false} />;
+          })()}
+
+        {/* Reactions */}
         <ReactionBar
           reactions={reactions}
           currentUserId={currentUserId}
           onToggle={handleToggleReaction}
         />
+
+        {/* Read receipts (own messages only) */}
+        {isOwn && readReceipts && readReceipts.length > 0 && (
+          <div className="mt-0.5 flex justify-end">
+            <ReadReceiptIndicator receipts={readReceipts} />
+          </div>
+        )}
+
+        {/* Thread reply count */}
         {replyCount != null && replyCount > 0 && (
           <button
             onClick={() => onOpenThread?.(message)}
-            className={`mt-0.5 flex items-center gap-1 text-xs text-indigo-400 hover:underline ${isOwn ? "ml-auto" : ""}`}
+            className="mt-0.5 flex items-center gap-1 text-xs text-indigo-400 hover:underline"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
             {replyCount} {replyCount === 1 ? "reply" : "replies"}

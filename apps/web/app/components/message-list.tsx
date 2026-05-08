@@ -30,6 +30,8 @@ interface MessageListProps {
   pinnedIds?: string[];
 }
 
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
 function getDateKey(dateStr: string): string {
   const d = new Date(dateStr);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -69,7 +71,6 @@ export function MessageList({
     prevMessagesLenRef.current = messages.length;
 
     if (isInitialLoadRef.current) {
-      // Initial load: jump to bottom immediately
       bottomRef.current?.scrollIntoView();
       isInitialLoadRef.current = false;
       return;
@@ -80,12 +81,10 @@ export function MessageList({
     }
   }, [messages]);
 
-  // Reset initial load flag on room change
   useEffect(() => {
     isInitialLoadRef.current = true;
   }, [roomId]);
 
-  // Scroll-up detection for infinite scroll
   const handleScroll = useCallback(() => {
     if (!containerRef.current || !onLoadMore || isLoadingMore || !hasMore) return;
     if (containerRef.current.scrollTop < 100) {
@@ -100,7 +99,6 @@ export function MessageList({
     return () => container.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
 
-  // Jump to message (pinned or search)
   useEffect(() => {
     if (!scrollToMessageId || !containerRef.current) return;
     const el = containerRef.current.querySelector(
@@ -124,8 +122,11 @@ export function MessageList({
   let lastDateKey = "";
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto p-4 scrollbar-hidden">
-      <div className="space-y-3">
+    // py-only (no horizontal padding) so each message row's hover background
+    // can span edge-to-edge while keeping the content padded via px-4 on the
+    // row itself.
+    <div ref={containerRef} className="flex-1 overflow-y-auto py-4 scrollbar-hidden">
+      <div>
         {/* Loading older messages spinner */}
         {isLoadingMore && (
           <div className="flex justify-center py-2">
@@ -143,24 +144,44 @@ export function MessageList({
           <div className="flex justify-center py-1">
             <button
               onClick={onLoadMore}
-              className="rounded-md px-3 py-1 text-xs text-indigo-400 hover:bg-hover hover:text-indigo-300 transition-colors"
+              className="rounded-md px-3 py-1 text-xs text-indigo-400 transition-colors hover:bg-hover hover:text-indigo-300"
             >
               Load older messages
             </button>
           </div>
         )}
 
-        {messages.map((msg) => {
+        {messages.map((msg, idx) => {
           const dateKey = getDateKey(msg.createdAt);
           const showSeparator = dateKey !== lastDateKey;
           lastDateKey = dateKey;
 
+          // Discord-style grouping: same sender, within 5 min, no date break.
+          // The deleted-state check prevents a tombstone visually merging with
+          // a regular message from the same author. Date-rollover always wins.
+          const prev = idx > 0 ? messages[idx - 1] : null;
+          const sameAuthor = prev != null && prev.senderId === msg.senderId;
+          const sameDeletedState =
+            prev != null && Boolean(prev.isDeleted) === Boolean(msg.isDeleted);
+          const withinWindow =
+            prev != null &&
+            new Date(msg.createdAt).getTime() -
+              new Date(prev.createdAt).getTime() <
+              GROUP_WINDOW_MS;
+          const isGrouped =
+            !showSeparator && sameAuthor && sameDeletedState && withinWindow;
+
           return (
             <div key={msg.id} data-msg-id={msg.id}>
-              {showSeparator && <DateSeparator date={msg.createdAt} />}
+              {showSeparator && (
+                <div className="px-4">
+                  <DateSeparator date={msg.createdAt} />
+                </div>
+              )}
               <MessageBubble
                 message={msg}
                 isOwn={msg.senderId === currentUserId}
+                isGrouped={isGrouped}
                 currentUserId={currentUserId}
                 roomId={roomId}
                 onEdit={onEdit}
