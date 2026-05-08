@@ -7,16 +7,30 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 
 type ReactionMap = Record<string, string[]>; // emoji -> userIds
+
+// Strict GIPHY URL shape — matches what the picker's `original.url` returns
+// from /v1/gifs/trending and /v1/gifs/search:
+//   https://media{N}.giphy.com/media/[v1.{base64}/]{id}/giphy.gif?{query}
+//   https://i.giphy.com/media/{id}/giphy.gif
+// The trailing-slash anchor on the host (`\.giphy\.com\/`) closes the
+// lookalike-domain hole (`media.giphy.com.evil.com/...`).
+const GIPHY_URL_PATTERN =
+  /^https:\/\/(media\d*|i)\.giphy\.com\/media\/(v1\.[A-Za-z0-9_-]+\/)?[A-Za-z0-9]+\/giphy\.gif(\?[^#]*)?$/;
+
+const ATTACHMENT_RATE_LIMIT = 10;
+const ATTACHMENT_RATE_WINDOW_SECONDS = 60;
 
 @Injectable()
 export class MessagesService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private redis: RedisService,
   ) {}
 
   private buildReactionMap(
@@ -128,14 +142,28 @@ export class MessagesService {
     });
     if (!member) throw new ForbiddenException('Not a member of this room');
 
-    // Attachment URL whitelist. Trailing slash is required so a lookalike
-    // domain (e.g. https://my-r2-evil.com) can't squeak past a bare prefix
-    // match against https://my-r2.com.
+    // Attachment URL whitelist. R2 stays as a prefix match (we mint those
+    // keys ourselves so any URL under R2_PUBLIC_URL is by-construction trusted).
+    // GIPHY URLs use a strict regex instead of a domain prefix so an attacker
+    // can't smuggle arbitrary paths under media.giphy.com — only the exact
+    // /media/[v1.{base64}/]{id}/giphy.gif shape the picker submits is allowed.
     if (dto.attachment?.url) {
+      const url = dto.attachment.url;
       const r2PublicUrl = this.config.getOrThrow<string>('R2_PUBLIC_URL');
-      if (!dto.attachment.url.startsWith(`${r2PublicUrl}/`)) {
+      const isR2 = url.startsWith(`${r2PublicUrl}/`);
+      const isGiphy = GIPHY_URL_PATTERN.test(url);
+      if (!isR2 && !isGiphy) {
         throw new BadRequestException('Attachment URL is not from an allowed source');
       }
+    }
+
+    // Per-user attachment rate limit (10/min). The general 30/min message
+    // limit (chat.gateway.ts for WS, the global ThrottlerGuard for HTTP) is
+    // too generous for media payloads — every recipient's browser fetches
+    // the GIF when the message renders, so a single sender can pile downstream
+    // bandwidth on every member of the room.
+    if (dto.attachment) {
+      await this.assertAttachmentRateLimit(userId);
     }
 
     // Cross-room reply check — without this, a member of R1 could quote a
@@ -273,6 +301,22 @@ export class MessagesService {
       roomId: message.roomId,
       reactions: this.buildReactionMap(reactions),
     };
+  }
+
+  /**
+   * Sliding-window attachment rate limit, separate from the general message
+   * counter. Increments a Redis counter keyed by user; sets the TTL on first
+   * hit so the window slides cleanly.
+   */
+  private async assertAttachmentRateLimit(userId: string): Promise<void> {
+    const key = `rl:msg-attachment:${userId}`;
+    const count = await this.redis.incr(key);
+    if (count === 1) {
+      await this.redis.expire(key, ATTACHMENT_RATE_WINDOW_SECONDS);
+    }
+    if (count > ATTACHMENT_RATE_LIMIT) {
+      throw new BadRequestException('Attachment rate limit exceeded — slow down');
+    }
   }
 
   async getUnreadMentions(userId: string) {
