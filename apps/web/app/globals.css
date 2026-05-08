@@ -10,9 +10,16 @@
   --input-bg: #e3e5e8;
   --text-primary: #060607;
   --text-secondary: #5c5e66;
+  --text-tertiary: #80828a;   /* ~50% black-on-white */
+  --text-quaternary: #a6a8ad; /* ~35% black-on-white */
   --border: #e3e5e8;
   --hover: #eaebed;
   --active: #e1e2e4;
+
+  /* Brand accent — fixed across light/dark, mirroring Tailwind's
+     indigo-500 / indigo-600 (Discord blurple range). */
+  --brand: #6366f1;
+  --brand-hover: #4f46e5;
 }
 
 .dark {
@@ -23,11 +30,16 @@
   --input-bg: #383a40;
   --text-primary: #f2f3f5;
   --text-secondary: #949ba4;
+  --text-tertiary: #80848e;   /* ~50% bright on dark */
+  --text-quaternary: #5d6065; /* ~35% bright on dark */
   --border: #3f4147;
   --hover: #35373c;
   --active: #3f4248;
 }
 
+/* Tailwind v4 theme tokens. `--font-sans` is what Tailwind's `font-sans`
+   utility resolves to — pointing it at Inter is the v4 equivalent of
+   `fontFamily.sans` in a JS tailwind.config. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -36,17 +48,24 @@
   --color-input: var(--input-bg);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-quaternary: var(--text-quaternary);
   --color-border: var(--border);
   --color-hover: var(--hover);
   --color-active: var(--active);
-  --font-sans: var(--font-geist-sans);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  /* Inter stylistic alternates that nudge it toward Discord's gg sans:
+     ss01 = open digits, cv11 = single-storey 'a', cv02 = rounded 'g'. */
+  font-feature-settings: "ss01", "cv11", "cv02";
 }
 
 .scrollbar-hidden {
@@ -102,6 +121,30 @@ body {
   background-color: rgba(250, 204, 21, 0.3);
   color: inherit;
   border-radius: 2px;
+}
+
+/* emoji-mart picker theme overrides. emoji-mart exposes RGB triples for its
+   accent/background/input/text colors and accepts a CSS color for borders.
+   Values mirror the project's --sidebar-bg, --input-bg, --text-primary, and
+   --brand tokens — declared inline as RGB triples since CSS has no hex→rgb
+   function. The picker also honours its own data-theme="dark" attribute set
+   by the React Picker's `theme` prop, so dark mode just needs to override
+   the swap-able tokens. */
+em-emoji-picker {
+  --rgb-background: 242, 243, 245; /* --sidebar-bg light #f2f3f5 */
+  --rgb-input: 227, 229, 232;      /* --input-bg light #e3e5e8 */
+  --rgb-color: 6, 6, 7;            /* --text-primary light #060607 */
+  --rgb-accent: 99, 102, 241;      /* --brand #6366f1 */
+  --color-border: var(--border);
+  --color-border-over: var(--border);
+  --border-radius: 0.5rem;
+  --font-family: var(--font-sans);
+}
+
+.dark em-emoji-picker {
+  --rgb-background: 30, 31, 34;    /* --sidebar-bg dark #1e1f22 */
+  --rgb-input: 56, 58, 64;         /* --input-bg dark #383a40 */
+  --rgb-color: 242, 243, 245;      /* --text-primary dark #f2f3f5 */
 }
 
 /* Toast slide-in animation */

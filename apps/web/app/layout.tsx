@@ -1,15 +1,21 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "./contexts/auth-context";
 import { ThemeProvider } from "./contexts/theme-context";
 import { ToastProvider } from "./components/toast";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// UI font — only the weights we actually use, no italic (markdown <em> falls
+// back to a synthesized slant; Inter italic would be a sizable bundle win to
+// avoid).
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
+// Mono is still Geist_Mono — only used by .md-code / .md-pre for code blocks.
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
@@ -35,7 +41,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${inter.variable} ${geistMono.variable} antialiased`}
       >
         <ThemeProvider>
           <AuthProvider>
