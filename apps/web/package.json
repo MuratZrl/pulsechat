@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@emoji-mart/data": "^1.2.1",
+    "@emoji-mart/react": "^1.1.1",
     "isomorphic-dompurify": "^2.19.0",
     "marked": "^18.0.3",
     "next": "16.1.6",

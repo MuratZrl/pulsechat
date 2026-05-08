@@ -1,3 +1,8 @@
+"use client";
+
+import { useState } from "react";
+import { EmojiPicker } from "./emoji-picker";
+
 interface MessageActionsProps {
   isOwn: boolean;
   isPinned: boolean;
@@ -7,6 +12,7 @@ interface MessageActionsProps {
   onPin: () => void;
   onForward?: () => void;
   onStar?: () => void;
+  onToggleReaction?: (emoji: string) => void;
   isStarred?: boolean;
 }
 
@@ -19,10 +25,61 @@ export function MessageActions({
   onPin,
   onForward,
   onStar,
+  onToggleReaction,
   isStarred,
 }: MessageActionsProps) {
+  const [showPicker, setShowPicker] = useState(false);
+
+  // Force the action bar visible while the picker is open — otherwise moving
+  // the cursor off the row collapses the group-hover state and takes the
+  // picker with it.
+  const visibilityClass = showPicker
+    ? "opacity-100"
+    : "opacity-0 group-hover:opacity-100";
+
   return (
-    <div className={`absolute -top-3 z-10 flex items-center gap-0.5 rounded-md border border-border bg-sidebar p-0.5 opacity-0 shadow-md transition-opacity group-hover:opacity-100 ${isOwn ? "right-0" : "left-0"}`}>
+    <div
+      className={`absolute -top-3 right-2 z-10 flex items-center gap-0.5 rounded-md border border-border bg-sidebar p-0.5 shadow-md transition-opacity ${visibilityClass}`}
+    >
+      {/* Add-reaction lives here now — keeps ReactionBar out of the row when
+          there are no reactions, so grouped messages stay tight. */}
+      {onToggleReaction && (
+        <div className="relative">
+          <button
+            onClick={() => setShowPicker((p) => !p)}
+            title="Add reaction"
+            className="flex h-6 w-6 items-center justify-center rounded text-text-secondary hover:bg-hover hover:text-text-primary"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+              <line x1="9" y1="9" x2="9.01" y2="9" />
+              <line x1="15" y1="9" x2="15.01" y2="9" />
+            </svg>
+          </button>
+          {showPicker && (
+            <EmojiPicker
+              onSelect={(emoji) => {
+                onToggleReaction(emoji);
+                setShowPicker(false);
+              }}
+              onClose={() => setShowPicker(false)}
+              // Anchor below-and-right-of the React button. The action bar is
+              // already top-right of the row, so the picker drops down-right.
+              className="absolute right-0 top-full z-50 mt-1"
+            />
+          )}
+        </div>
+      )}
       <ActionButton title="Reply" onClick={onReply}>
         <path d="M9 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-5 5v-5z" />
       </ActionButton>
