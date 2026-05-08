@@ -7,7 +7,7 @@ import { AttachmentPicker } from "./attachment-picker";
 import { GifPicker } from "./gif-picker";
 import { VoiceRecorder } from "./voice-recorder";
 import { ReplyPreviewBar } from "./reply-preview";
-import { MockGif } from "../lib/mock-gifs";
+import { GiphyGif } from "../lib/giphy";
 import { apiClient } from "../lib/api-client";
 
 interface RoomUser {
@@ -64,15 +64,27 @@ export function MessageInput({ onSend, replyingTo, onCancelReply, roomId }: Mess
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = text.trim();
-    if (trimmed || pendingAttachment) {
-      onSend(trimmed || (pendingAttachment ? `Sent ${pendingAttachment.name}` : ""), {
-        replyToId: replyingTo?.id,
-        attachment: pendingAttachment || undefined,
-      });
-      setText("");
-      setPendingAttachment(null);
-      setMentionPrefix(null);
+    if (!trimmed && !pendingAttachment) return;
+
+    // Auto-label fallback when the user typed nothing. Images and voice
+    // messages render as their own visual element (an <img> or VoicePlayer),
+    // so a "Sent foo.png" caption above them is noise — Discord-style is to
+    // show just the media. Generic files still get the caption because a
+    // bare file card alone is easy to miss in a busy channel.
+    let body = trimmed;
+    if (!body && pendingAttachment) {
+      const skipLabel =
+        pendingAttachment.type === "image" || pendingAttachment.type === "voice";
+      body = skipLabel ? "" : `Sent ${pendingAttachment.name}`;
     }
+
+    onSend(body, {
+      replyToId: replyingTo?.id,
+      attachment: pendingAttachment || undefined,
+    });
+    setText("");
+    setPendingAttachment(null);
+    setMentionPrefix(null);
   }
 
   function handleTextChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -143,13 +155,13 @@ export function MessageInput({ onSend, replyingTo, onCancelReply, roomId }: Mess
     inputRef.current?.focus();
   }
 
-  function handleGifSelect(gif: MockGif) {
-    onSend(`[GIF] ${gif.title}`, {
+  function handleGifSelect(gif: GiphyGif) {
+    onSend("", {
       replyToId: replyingTo?.id,
       attachment: {
         type: "image",
         name: gif.title,
-        url: gif.color,
+        url: gif.url,
         size: "GIF",
       },
     });
@@ -157,7 +169,10 @@ export function MessageInput({ onSend, replyingTo, onCancelReply, roomId }: Mess
   }
 
   function handleVoiceSend(attachment: Attachment) {
-    onSend("Voice message", {
+    // Voice messages render via VoicePlayer (waveform + duration). The body
+    // is empty so there's no "Voice message" caption duplicating what the
+    // player already conveys visually.
+    onSend("", {
       replyToId: replyingTo?.id,
       attachment,
     });
