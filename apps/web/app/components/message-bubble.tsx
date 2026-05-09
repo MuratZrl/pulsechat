@@ -165,7 +165,25 @@ export function MessageBubble({
       <Gutter />
 
       <div className="min-w-0 flex-1">
-        {/* Floating action menu — anchored to the row's right edge */}
+        {/* Inner content wrapper. `relative` so MessageActions's absolute
+            positioning resolves against this constrained block, and
+            `max-w-2xl` caps the visual content at ~672px so on wide
+            screens the toolbar sits adjacent to the message body instead
+            of floating at the row's right edge.
+
+            We deliberately don't use `w-fit` here even though it would
+            put the toolbar tighter against short content: lazy-loaded
+            GIFs render at 0×0 until they enter the viewport, which
+            collapses a `w-fit` wrapper to zero width and parks the
+            absolute toolbar at content-start until the image lays out.
+            Fixed-cap is visually consistent across all content kinds
+            at the cost of some empty space on short messages.
+
+            The outer `min-w-0 flex-1` keeps the flex layout against
+            the gutter unchanged; this inner block handles content
+            sizing. */}
+        <div className="relative max-w-2xl">
+        {/* Floating action menu — anchored to this wrapper's top-right. */}
         <MessageActions
           isOwn={isOwn}
           isPinned={pinned}
@@ -399,6 +417,7 @@ export function MessageBubble({
             {replyCount} {replyCount === 1 ? "reply" : "replies"}
           </button>
         )}
+        </div>
       </div>
     </div>
   );
