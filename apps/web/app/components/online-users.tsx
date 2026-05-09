@@ -70,7 +70,11 @@ function UserGroup({
               }`}
             >
               <span className="relative">
-                <Avatar name={user.name} size="sm" />
+                <Avatar
+                  name={user.name}
+                  size="sm"
+                  avatarUrl={user.avatarUrl}
+                />
                 {/* Status dot anchored at the avatar's bottom-right with a
                     small outward translate, plus a 2px border in the panel
                     bg color to read as a separate puck rather than a tinted

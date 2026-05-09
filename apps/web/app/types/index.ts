@@ -11,6 +11,7 @@ export interface OnlineUser {
   id: string;
   name: string;
   status: UserStatus;
+  avatarUrl?: string | null;
 }
 
 export interface Room {
