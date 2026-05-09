@@ -673,7 +673,19 @@ export default function ChatRoomPage({
         await apiClient.get<PaginatedMessages>(
           `/rooms/${roomId}/messages?limit=15&before=${encodeURIComponent(oldest.createdAt)}`
         );
-      setMessages((prev) => [...older, ...prev]);
+      // Dedupe before prepending. The scroll listener fires onLoadMore
+      // whenever scrollTop drops under its threshold, including spurious
+      // jitter from lazy-loaded GIF/image layout shifts; if it fires while
+      // the API's older window overlaps with messages already in state,
+      // a naive [...older, ...prev] produces duplicate React keys and the
+      // map at MessageList warns. Mirrors the search-merge idSet pattern
+      // earlier in this file.
+      setMessages((prev) => {
+        const idSet = new Set(prev.map((m) => m.id));
+        const fresh = older.filter((m) => !idSet.has(m.id));
+        if (fresh.length === 0) return prev;
+        return [...fresh, ...prev];
+      });
       setHasMore(moreExist);
     } catch (e) {
       console.error("Failed to load more messages:", e);
