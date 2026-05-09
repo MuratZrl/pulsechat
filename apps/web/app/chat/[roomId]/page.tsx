@@ -188,8 +188,12 @@ export default function ChatRoomPage({
   useEffect(() => {
     if (!socket || !user) return;
 
-    // Join the socket room
-    socket.emit("join_room", { roomId });
+    // No explicit join_room emit — the gateway's connection handler
+    // auto-joins every room the user is a member of, so this socket is
+    // already in `roomId` by the time we arrive here. The previous emit
+    // raced the connection-time auth (client.userId set after a Prisma
+    // lookup) and produced a swallowed PrismaClientValidationError on
+    // every page mount.
 
     const onNewMessage = (msg: Message) => {
       if (msg.roomId !== roomId) return;
@@ -316,7 +320,10 @@ export default function ChatRoomPage({
       socket.off("room_users", onRoomUsers);
       socket.off("reaction_updated", onReactionUpdated);
       socket.off("read_receipt", onReadReceipt);
-      socket.emit("leave_room", { roomId });
+      // No leave_room emit — the socket stays in every member room for the
+      // lifetime of the connection so the sidebar's RoomList can keep
+      // receiving new_message broadcasts and update unread counts for rooms
+      // the user isn't currently viewing.
     };
   }, [socket, roomId, user]);
 

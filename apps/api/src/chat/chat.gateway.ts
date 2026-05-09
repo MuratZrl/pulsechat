@@ -4,6 +4,7 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   MessageBody,
   ConnectedSocket,
   WsException,
@@ -33,7 +34,9 @@ interface AuthSocket extends Socket {
   namespace: '/',
 })
 @SkipThrottle()
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
+{
   @WebSocketServer()
   server: Server;
 
@@ -78,41 +81,66 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  /**
+   * Connection-time auth gate. Runs as socket.io middleware, so it executes
+   * before any @SubscribeMessage handler can fire — no race window where
+   * client.userId is undefined while a queued event tries to use it.
+   * Failed auth rejects the connection outright; successful auth attaches
+   * userId/userName to the socket once, synchronously from the middleware's
+   * perspective.
+   */
+  afterInit(server: Server): void {
+    server.use(async (socket: Socket, next: (err?: Error) => void) => {
+      try {
+        const token =
+          socket.handshake.auth?.token ||
+          socket.handshake.headers.authorization?.replace('Bearer ', '');
+        if (!token) return next(new Error('No token'));
+
+        const payload = this.jwt.verify<{ sub: string; email: string }>(token, {
+          secret: this.config.getOrThrow<string>('JWT_SECRET'),
+        });
+
+        const user = await this.prisma.user.findUnique({
+          where: { id: payload.sub },
+          select: { id: true, name: true },
+        });
+        if (!user) return next(new Error('User not found'));
+
+        const authSocket = socket as AuthSocket;
+        authSocket.userId = user.id;
+        authSocket.userName = user.name;
+
+        next();
+      } catch (err) {
+        this.logger.warn(
+          `WS auth rejected: ${err instanceof Error ? err.message : 'unknown error'}`,
+        );
+        next(new Error('Unauthorized'));
+      }
+    });
+  }
+
   async handleConnection(client: AuthSocket) {
+    // Auth ran in middleware — client.userId and client.userName are
+    // guaranteed set by the time we get here. This handler is now just the
+    // post-auth setup: join the per-user room, auto-join every channel the
+    // user belongs to, and broadcast presence.
     try {
-      const token =
-        client.handshake.auth?.token ||
-        client.handshake.headers.authorization?.replace('Bearer ', '');
-      if (!token) throw new Error('No token');
-
-      const payload = this.jwt.verify<{ sub: string; email: string }>(token, {
-        secret: this.config.getOrThrow<string>('JWT_SECRET'),
-      });
-
-      const user = await this.prisma.user.findUnique({
-        where: { id: payload.sub },
-        select: { id: true, name: true },
-      });
-      if (!user) throw new Error('User not found');
-
-      client.userId = user.id;
-      client.userName = user.name;
-
       // Per-user room — used by direct emits like `mention` so we can target
       // the user without knowing which sockets they currently have open.
-      await client.join(`user:${user.id}`);
+      await client.join(`user:${client.userId}`);
 
-      // Auto-join all rooms the user is a member of
       const memberships = await this.prisma.roomMember.findMany({
-        where: { userId: user.id },
+        where: { userId: client.userId },
         select: { roomId: true },
       });
 
       for (const { roomId } of memberships) {
         await client.join(roomId);
         client.to(roomId).emit('user_online', {
-          userId: user.id,
-          userName: user.name,
+          userId: client.userId,
+          userName: client.userName,
         });
       }
 
@@ -120,10 +148,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         await this.emitRoomUsers(roomId);
       }
 
-      this.logger.debug(`User ${user.id} (${user.name}) connected`);
+      this.logger.debug(
+        `User ${client.userId} (${client.userName}) connected`,
+      );
     } catch (err) {
       this.logger.warn(
-        `WS auth failed: ${err instanceof Error ? err.message : 'unknown error'}`,
+        `WS post-auth setup failed: ${err instanceof Error ? err.message : 'unknown error'}`,
       );
       client.disconnect();
     }
