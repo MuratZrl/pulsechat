@@ -42,3 +42,7 @@ apps/api/node_modules/
 
 # User uploads
 apps/api/uploads/
+
+# Root-level lockfiles — each app manages its own
+/package-lock.json
+/pnpm-lock.yaml

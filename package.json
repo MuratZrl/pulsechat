@@ -1,13 +1,13 @@
 {
   "name": "pulsechat",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
+  "description": "Real-time chat application — Next.js 16, NestJS 11, Prisma, Postgres, Redis, Socket.io",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+    "dev:web": "cd apps/web && pnpm dev",
+    "dev:api": "cd apps/api && pnpm start:dev",
+    "build:web": "cd apps/web && pnpm build",
+    "build:api": "cd apps/api && pnpm build",
+    "install:all": "cd apps/web && pnpm install && cd ../api && pnpm install"
+  }
 }
