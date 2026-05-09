@@ -36,6 +36,7 @@ export interface ReplyPreview {
   id: string;
   text: string;
   senderName: string;
+  attachment?: Attachment;
 }
 
 export type Reactions = Record<string, string[]>; // emoji -> userIds[]

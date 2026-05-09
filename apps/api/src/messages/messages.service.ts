@@ -61,6 +61,7 @@ export class MessagesService {
       id: string;
       text: string;
       isDeleted: boolean;
+      attachment?: unknown;
       sender: { name: string };
     } | null;
   }) {
@@ -78,6 +79,12 @@ export class MessagesService {
         ? {
             id: msg.replyTo.id,
             text: msg.replyTo.isDeleted ? '' : msg.replyTo.text,
+            // Strip the attachment on tombstones too — a deleted parent should
+            // render as "This message was deleted" in the reply preview, not
+            // expose a still-resolvable image/file URL after deletion.
+            attachment: msg.replyTo.isDeleted
+              ? undefined
+              : (msg.replyTo.attachment ?? undefined),
             senderName: msg.replyTo.sender.name,
           }
         : undefined,
@@ -95,6 +102,10 @@ export class MessagesService {
         id: true,
         text: true,
         isDeleted: true,
+        // attachment surfaces in the ReplyQuote so empty-body sends (new
+        // GIFs/voice/image/file) and legacy "[GIF] {title}" captions can fall
+        // through to a meaningful preview instead of a deleted placeholder.
+        attachment: true,
         sender: { select: { name: true } },
       },
     },
