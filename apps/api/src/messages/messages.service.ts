@@ -260,10 +260,16 @@ export class MessagesService {
         ),
       ];
 
+      // No `id: { not: userId }` exclusion: self-tags need a Mention row
+      // so the renderer can paint a pill on the author's @-name for every
+      // reader (including the author themselves, in self-mention amber).
+      // Notification suppression for self-tags is handled at two later
+      // gates: the row is inserted with `read: true` below (so the unread
+      // mention count badge doesn't inflate), and the gateway's `mention`
+      // socket emit skips the author's own per-user room.
       const users = await this.prisma.user.findMany({
         where: {
           name: { in: allCandidates, mode: 'insensitive' },
-          id: { not: userId },
           rooms: { some: { roomId } },
         },
         select: { id: true, name: true },
@@ -289,6 +295,12 @@ export class MessagesService {
             data: [...matchedUserIds].map((uid) => ({
               messageId: message.id,
               userId: uid,
+              // Self-mentions land pre-read so they don't inflate the
+              // author's unread mention count in the sidebar. Mentions of
+              // others stay `read: false` (the schema default) until the
+              // recipient opens the room and POST /rooms/:id/read sweeps
+              // them via mention.updateMany.
+              read: uid === userId,
             })),
             skipDuplicates: true,
           });

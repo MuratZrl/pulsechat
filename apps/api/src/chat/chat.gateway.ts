@@ -222,12 +222,18 @@ export class ChatGateway
       // formatter always returns a reactions field — and the emit targeted
       // a room named after the userId that no socket had joined, so mention
       // events never reached the client.)
+      //
+      // Self-mention rows exist in DB now (the renderer needs them to paint
+      // the author's own @-name as a pill), but we still skip the
+      // notification emit for the author's own row — they shouldn't get a
+      // toast/sound for tagging themselves.
       const mentions = await this.prisma.mention.findMany({
         where: { messageId: message.id },
         select: { userId: true },
       });
-      for (const { userId } of mentions) {
-        this.server.to(`user:${userId}`).emit('mention', {
+      for (const { userId: mentionedUserId } of mentions) {
+        if (mentionedUserId === client.userId) continue;
+        this.server.to(`user:${mentionedUserId}`).emit('mention', {
           roomId,
           messageId: message.id,
           fromName: client.userName,
