@@ -9,6 +9,7 @@ import { VoiceRecorder } from "./voice-recorder";
 import { ReplyPreviewBar } from "./reply-preview";
 import { GiphyGif } from "../lib/giphy";
 import { apiClient } from "../lib/api-client";
+import { useSocket } from "../hooks/useSocket";
 
 interface RoomUser {
   id: string;
@@ -48,6 +49,38 @@ export function MessageInput({ onSend, replyingTo, onCancelReply, roomId }: Mess
     apiClient.get<RoomUser[]>("/rooms/users/list").then(setAllUsers).catch(() => {});
   }, []);
 
+  // Typing indicator wiring. Throttle typing_start to one emit per ~2.5s
+  // (each emit refreshes the receiver-side 3s safety window in page.tsx),
+  // and schedule a typing_stop 3s after the last keystroke. The throttle
+  // and stop window are matched so client and server agree on when typing
+  // ends, and so a missed stop is recovered by the receiver's safety net
+  // at roughly the same moment the sender would have given up anyway.
+  const { socket } = useSocket();
+  const lastTypingEmitAtRef = useRef<number>(0);
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef<boolean>(false);
+
+  function emitTypingStop() {
+    if (stopTimerRef.current) {
+      clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+    if (isTypingRef.current && socket && roomId) {
+      socket.emit("typing_stop", { roomId });
+    }
+    isTypingRef.current = false;
+    lastTypingEmitAtRef.current = 0;
+  }
+
+  // Cleanup on unmount and room-change. The cleanup closure captures the
+  // socket+roomId from the render where the effect ran, so when roomId
+  // flips A → B the OLD room receives the stop signal before the new
+  // effect sets up.
+  useEffect(() => {
+    return () => emitTypingStop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, socket]);
+
   const filteredUsers =
     mentionPrefix !== null
       ? allUsers
@@ -82,6 +115,9 @@ export function MessageInput({ onSend, replyingTo, onCancelReply, roomId }: Mess
       replyToId: replyingTo?.id,
       attachment: pendingAttachment || undefined,
     });
+    // Sending implies the user is no longer typing — stop immediately
+    // rather than waiting for the 3s silence timer to expire.
+    emitTypingStop();
     setText("");
     setPendingAttachment(null);
     setMentionPrefix(null);
@@ -94,6 +130,36 @@ export function MessageInput({ onSend, replyingTo, onCancelReply, roomId }: Mess
     const prefix = getMentionPrefix(val, cursor);
     setMentionPrefix(prefix);
     setMentionHighlight(0);
+
+    // User cleared the input — they're no longer typing, signal stop now
+    // rather than letting the 3s silence timer trail. (handleSubmit's own
+    // setText("") doesn't reach this branch since programmatic state
+    // updates don't fire onChange.)
+    if (val.length === 0) {
+      emitTypingStop();
+      return;
+    }
+    if (!socket || !roomId) return;
+
+    const now = Date.now();
+    if (now - lastTypingEmitAtRef.current > 2500) {
+      socket.emit("typing_start", { roomId });
+      lastTypingEmitAtRef.current = now;
+      isTypingRef.current = true;
+    }
+
+    // Reset the stop timer on every keystroke. As long as the user keeps
+    // typing within 3s windows, this never fires; the moment they pause
+    // for 3s we emit stop and the indicator clears on the receiver.
+    if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+    stopTimerRef.current = setTimeout(() => {
+      if (isTypingRef.current && socket && roomId) {
+        socket.emit("typing_stop", { roomId });
+      }
+      isTypingRef.current = false;
+      lastTypingEmitAtRef.current = 0;
+      stopTimerRef.current = null;
+    }, 3000);
   }
 
   /** Replace the partial @word with the selected user's @name */
