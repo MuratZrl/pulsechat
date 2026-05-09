@@ -3,12 +3,20 @@
 import { useCallback, useRef, useState } from "react";
 import Cropper, { Area } from "react-easy-crop";
 import { Modal } from "./modal";
-import { PRESET_AVATARS } from "../lib/avatars";
+import { PRESET_AVATARS, AvatarPresetId } from "../lib/avatars";
 import { apiClient } from "../lib/api-client";
+
+export interface AvatarSelection {
+  // Either a preset id, an R2 custom URL, or both null (cleared).
+  // The component never emits both non-null at the same time.
+  avatarUrl: string | null;
+  avatarPreset: AvatarPresetId | null;
+}
 
 interface AvatarPickerProps {
   currentAvatarUrl?: string | null;
-  onSelect: (avatarUrl: string | null) => void;
+  currentAvatarPreset?: string | null;
+  onSelect: (selection: AvatarSelection) => void;
   onClose: () => void;
 }
 
@@ -48,14 +56,30 @@ async function getCroppedBlob(
   });
 }
 
+function isPresetId(value: string | null | undefined): value is AvatarPresetId {
+  if (!value) return false;
+  return PRESET_AVATARS.some((p) => p.id === value);
+}
+
 export function AvatarPicker({
   currentAvatarUrl,
+  currentAvatarPreset,
   onSelect,
   onClose,
 }: AvatarPickerProps) {
-  const [selected, setSelected] = useState<string | null>(
-    currentAvatarUrl || null
+  // Two parallel state slots — at most one is non-null at any moment. Picking
+  // a preset clears the custom URL slot; uploading clears the preset slot.
+  // "Remove" clears both. This mirrors the backend's mutual-exclusion rule
+  // so Apply always emits a valid combination.
+  const [selectedPreset, setSelectedPreset] = useState<AvatarPresetId | null>(
+    isPresetId(currentAvatarPreset) ? currentAvatarPreset : null,
   );
+  const [selectedCustomUrl, setSelectedCustomUrl] = useState<string | null>(
+    // Preset takes precedence in the initial state — if both fields are
+    // somehow set on the user record, treat the preset as authoritative.
+    isPresetId(currentAvatarPreset) ? null : currentAvatarUrl ?? null,
+  );
+
   const [isUploading, setIsUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -73,6 +97,24 @@ export function AvatarPicker({
     },
     []
   );
+
+  function handlePresetClick(presetId: AvatarPresetId) {
+    setSelectedPreset(presetId);
+    setSelectedCustomUrl(null);
+  }
+
+  function handleRemove() {
+    setSelectedPreset(null);
+    setSelectedCustomUrl(null);
+  }
+
+  function handleApply() {
+    onSelect({
+      avatarUrl: selectedCustomUrl,
+      avatarPreset: selectedPreset,
+    });
+    onClose();
+  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -113,7 +155,8 @@ export function AvatarPicker({
         "/upload",
         formData,
       );
-      setSelected(data.url);
+      setSelectedCustomUrl(data.url);
+      setSelectedPreset(null);
       setCropImage(null);
     } catch {
       alert("Failed to upload avatar. Please try again.");
@@ -208,27 +251,46 @@ export function AvatarPicker({
         </h3>
 
         <div className="mb-4 grid grid-cols-4 gap-3">
-          {PRESET_AVATARS.map((avatar) => (
-            <button
-              key={avatar.id}
-              onClick={() => setSelected(avatar.url)}
-              className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
-                selected === avatar.url
-                  ? "bg-orange-600/20 ring-2 ring-orange-500"
-                  : "hover:bg-hover"
-              }`}
-            >
-              <img
-                src={avatar.url}
-                alt={avatar.label}
-                className="h-12 w-12 rounded-full"
-              />
-              <span className="text-[10px] text-text-secondary">
-                {avatar.label}
-              </span>
-            </button>
-          ))}
+          {PRESET_AVATARS.map((avatar) => {
+            const isSelected = selectedPreset === avatar.id;
+            return (
+              <button
+                key={avatar.id}
+                onClick={() => handlePresetClick(avatar.id)}
+                className={`flex flex-col items-center gap-1 rounded-lg p-2 transition-colors ${
+                  isSelected
+                    ? "bg-orange-600/20 ring-2 ring-orange-500"
+                    : "hover:bg-hover"
+                }`}
+              >
+                <img
+                  src={avatar.url}
+                  alt={avatar.label}
+                  className="h-12 w-12 rounded-full"
+                />
+                <span className="text-[10px] text-text-secondary">
+                  {avatar.label}
+                </span>
+              </button>
+            );
+          })}
         </div>
+
+        {/* Show the active custom upload preview if there is one and no preset
+            is selected — gives the user feedback that their previous upload
+            is still in effect. */}
+        {selectedCustomUrl && !selectedPreset && (
+          <div className="mb-4 flex items-center gap-3 rounded-md bg-active/50 px-3 py-2">
+            <img
+              src={selectedCustomUrl}
+              alt="Custom avatar"
+              className="h-10 w-10 rounded-full object-cover"
+            />
+            <span className="text-xs text-text-secondary">
+              Custom upload selected
+            </span>
+          </div>
+        )}
 
         <div className="mb-4 flex gap-2">
           <button
@@ -247,7 +309,7 @@ export function AvatarPicker({
           />
           <button
             type="button"
-            onClick={() => setSelected(null)}
+            onClick={handleRemove}
             className="rounded-md border border-border px-3 py-2 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
           >
             Remove
@@ -262,10 +324,7 @@ export function AvatarPicker({
             Cancel
           </button>
           <button
-            onClick={() => {
-              onSelect(selected);
-              onClose();
-            }}
+            onClick={handleApply}
             className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-500"
           >
             Apply

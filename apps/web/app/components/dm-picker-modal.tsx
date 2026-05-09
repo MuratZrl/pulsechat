@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { Modal } from "./modal";
+import { Avatar } from "./avatar";
 import { apiClient } from "../lib/api-client";
 
 interface AppUser {
   id: string;
   name: string;
   avatarUrl?: string | null;
+  avatarPreset?: string | null;
 }
 
 interface DmPickerModalProps {
@@ -103,9 +105,12 @@ export function DmPickerModal({ onClose, onSelect }: DmPickerModalProps) {
                 onClick={() => onSelect(u.id)}
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-text-primary transition-colors hover:bg-hover"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">
-                  {u.name.slice(0, 2).toUpperCase()}
-                </div>
+                <Avatar
+                  name={u.name}
+                  size="md"
+                  avatarUrl={u.avatarUrl}
+                  avatarPreset={u.avatarPreset}
+                />
                 {u.name}
               </button>
             ))

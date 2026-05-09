@@ -3,6 +3,12 @@ export interface User {
   name: string;
   email: string;
   emailVerified?: boolean;
+  // Avatar fields are populated by /auth/me and PATCH /users/me. They are
+  // absent on the user object returned by /auth/login and /auth/register
+  // (those endpoints don't select them yet) — callers that need them on
+  // login should rely on the subsequent /auth/me call instead.
+  avatarUrl?: string | null;
+  avatarPreset?: string | null;
 }
 
 export type UserStatus = "online" | "idle" | "offline";
@@ -12,6 +18,7 @@ export interface OnlineUser {
   name: string;
   status: UserStatus;
   avatarUrl?: string | null;
+  avatarPreset?: string | null;
 }
 
 export interface Room {
@@ -68,7 +75,8 @@ export interface UserProfile {
   name: string;
   email?: string;
   bio: string;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
+  avatarPreset?: string | null;
   status: "online" | "idle" | "offline";
   joinedAt: string;
 }

@@ -1,7 +1,25 @@
-// Preset avatar generator (SVG data URIs — no backend needed)
+// Preset avatars are SVG data URIs generated client-side — no static asset
+// roundtrip and no backend storage of the resolved image. The DB stores the
+// preset id ("cat", "fox", ...) on User.avatarPreset; rendering resolves it
+// here. The id list must stay in sync with `AVATAR_PRESETS` on the API side
+// (apps/api/src/users/avatar-presets.ts) — anything the API accepts must be
+// renderable here.
+
+export const AVATAR_PRESET_IDS = [
+  'cat',
+  'dog',
+  'fox',
+  'panda',
+  'unicorn',
+  'robot',
+  'alien',
+  'ghost',
+] as const;
+
+export type AvatarPresetId = (typeof AVATAR_PRESET_IDS)[number];
 
 export interface PresetAvatar {
-  id: string;
+  id: AvatarPresetId;
   label: string;
   url: string;
 }
@@ -26,3 +44,27 @@ export const PRESET_AVATARS: PresetAvatar[] = [
   { id: "alien", label: "Alien", url: makeAvatar("👽", "#34d399") },
   { id: "ghost", label: "Ghost", url: makeAvatar("👻", "#e879f9") },
 ];
+
+const PRESET_BY_ID = new Map<string, PresetAvatar>(
+  PRESET_AVATARS.map((p) => [p.id, p])
+);
+
+/**
+ * Centralized avatar resolution. Every render site should pipe both fields
+ * through this helper so the precedence rule lives in exactly one place:
+ *   preset wins → custom URL → null (caller renders initials/fallback).
+ *
+ * Both fields are accepted as `null | undefined` so callers can pass the raw
+ * server payload without coercing.
+ */
+export function resolveAvatarUrl(input: {
+  avatarUrl?: string | null;
+  avatarPreset?: string | null;
+}): string | null {
+  if (input.avatarPreset) {
+    const match = PRESET_BY_ID.get(input.avatarPreset);
+    if (match) return match.url;
+  }
+  if (input.avatarUrl) return input.avatarUrl;
+  return null;
+}

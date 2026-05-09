@@ -33,7 +33,8 @@ interface AuthContextType {
   updateProfile: (updates: {
     name?: string;
     bio?: string;
-    avatarUrl?: string;
+    avatarUrl?: string | null;
+    avatarPreset?: string | null;
   }) => Promise<{ success: boolean; error?: string }>;
   changePassword: (
     currentPassword: string,
@@ -116,7 +117,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function updateProfile(updates: {
     name?: string;
     bio?: string;
-    avatarUrl?: string;
+    avatarUrl?: string | null;
+    avatarPreset?: string | null;
   }) {
     if (!user) return { success: false, error: "Not authenticated" };
     try {

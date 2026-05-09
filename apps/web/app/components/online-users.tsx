@@ -74,6 +74,7 @@ function UserGroup({
                   name={user.name}
                   size="sm"
                   avatarUrl={user.avatarUrl}
+                  avatarPreset={user.avatarPreset}
                 />
                 {/* Status dot anchored at the avatar's bottom-right with a
                     small outward translate, plus a 2px border in the panel

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useAuth } from "../contexts/auth-context";
 import { useToast } from "../components/toast";
 import { Avatar } from "../components/avatar";
-import { AvatarPicker } from "../components/avatar-picker";
+import { AvatarPicker, AvatarSelection } from "../components/avatar-picker";
 import { PasswordInput } from "../components/password-input";
 import { validatePassword } from "../lib/validation";
 import { apiClient } from "../lib/api-client";
@@ -23,7 +23,11 @@ export default function SettingsPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [bio, setBio] = useState("");
+  // Two parallel slots, mirroring the backend's mutual-exclusion rule. At
+  // most one is non-null at any moment. The avatar picker emits both fields
+  // explicitly on Apply so we always know the user's intent.
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarPreset, setAvatarPreset] = useState<string | null>(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [profileError, setProfileError] = useState("");
 
@@ -46,12 +50,13 @@ export default function SettingsPage() {
     if (user) {
       setName(user.name);
       setEmail(user.email);
-      // Fetch full profile from API for bio and avatarUrl
+      // Fetch full profile from API for bio + avatar fields
       apiClient
         .get<UserProfile>("/users/me")
         .then((profile) => {
           setBio(profile.bio || "");
-          setAvatarUrl(profile.avatarUrl || null);
+          setAvatarUrl(profile.avatarUrl ?? null);
+          setAvatarPreset(profile.avatarPreset ?? null);
         })
         .catch(() => {
           // Fallback: use what's on the user object
@@ -66,9 +71,17 @@ export default function SettingsPage() {
       setProfileError("Name is required");
       return;
     }
+    // Send both avatar fields explicitly. The DTO/service treats `null` as
+    // "clear this column", so sending the inactive slot as null guarantees
+    // the DB ends up consistent (preset xor custom URL, never both).
     // Email is read-only — backend doesn't accept email updates, so only
     // send the fields it actually persists.
-    const result = await updateProfile({ name: name.trim(), bio, avatarUrl: avatarUrl || undefined });
+    const result = await updateProfile({
+      name: name.trim(),
+      bio,
+      avatarUrl,
+      avatarPreset,
+    });
     if (result.success) {
       showToast("Profile updated", "success");
     } else {
@@ -76,8 +89,9 @@ export default function SettingsPage() {
     }
   }
 
-  function handleAvatarSelect(url: string | null) {
-    setAvatarUrl(url);
+  function handleAvatarSelect(selection: AvatarSelection) {
+    setAvatarUrl(selection.avatarUrl);
+    setAvatarPreset(selection.avatarPreset);
   }
 
   async function handlePasswordSave(e: FormEvent) {
@@ -151,7 +165,12 @@ export default function SettingsPage() {
           )}
 
           <div className="mb-4 flex items-center gap-4">
-            <Avatar name={name || "U"} size="xl" avatarUrl={avatarUrl} />
+            <Avatar
+              name={name || "U"}
+              size="xl"
+              avatarUrl={avatarUrl}
+              avatarPreset={avatarPreset}
+            />
             <button
               type="button"
               onClick={() => setShowAvatarPicker(true)}
@@ -309,6 +328,7 @@ export default function SettingsPage() {
       {showAvatarPicker && (
         <AvatarPicker
           currentAvatarUrl={avatarUrl}
+          currentAvatarPreset={avatarPreset}
           onSelect={handleAvatarSelect}
           onClose={() => setShowAvatarPicker(false)}
         />

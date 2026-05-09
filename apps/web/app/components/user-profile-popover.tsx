@@ -29,7 +29,8 @@ interface UserProfile {
   name: string;
   email?: string;
   bio?: string;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
+  avatarPreset?: string | null;
   createdAt?: string;
 }
 
@@ -80,7 +81,12 @@ export function UserProfilePopover({
     >
       <div className="flex items-center gap-3">
         <div className="relative">
-          <Avatar name={displayName} size="lg" avatarUrl={profile?.avatarUrl} />
+          <Avatar
+            name={displayName}
+            size="lg"
+            avatarUrl={profile?.avatarUrl}
+            avatarPreset={profile?.avatarPreset}
+          />
           <div
             className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-sidebar ${statusColors[userStatus]}`}
           />

@@ -1,3 +1,5 @@
+import { resolveAvatarUrl } from "../lib/avatars";
+
 const COLORS = [
   "bg-red-500",
   "bg-orange-500",
@@ -33,6 +35,7 @@ interface AvatarProps {
   name: string;
   size?: "sm" | "md" | "lg" | "xl";
   avatarUrl?: string | null;
+  avatarPreset?: string | null;
 }
 
 const sizeClasses = {
@@ -42,13 +45,16 @@ const sizeClasses = {
   xl: "h-16 w-16 text-lg",
 };
 
-export function Avatar({ name, size = "md", avatarUrl }: AvatarProps) {
+export function Avatar({ name, size = "md", avatarUrl, avatarPreset }: AvatarProps) {
   const sizeClass = sizeClasses[size];
 
-  if (avatarUrl) {
+  // Single resolution path for all callers — preset > custom URL > initials.
+  const resolved = resolveAvatarUrl({ avatarUrl, avatarPreset });
+
+  if (resolved) {
     return (
       <img
-        src={avatarUrl}
+        src={resolved}
         alt={name}
         className={`shrink-0 rounded-full object-cover ${sizeClass}`}
       />
