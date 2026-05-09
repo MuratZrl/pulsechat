@@ -109,9 +109,14 @@ export function MessageBubble({
 
   const Gutter = () =>
     isGrouped ? (
-      <div className="w-10 flex-shrink-0 pt-[3px] text-right pr-1">
+      // Empty block + absolute span: keeps the gutter's natural height at 0
+      // so the flex row collapses to the content row's height (~20px) instead
+      // of being dragged to 51px by the strut of a wrapping "02:35 AM" line.
+      // `leading-none` on the div prevents a phantom line-box from forming
+      // even briefly during render.
+      <div className="relative w-10 flex-shrink-0 leading-none">
         <span
-          className="text-[10px] leading-none text-text-secondary opacity-0 transition-opacity group-hover:opacity-100"
+          className="absolute right-1 top-[3px] whitespace-nowrap text-[10px] text-text-secondary opacity-0 transition-opacity group-hover:opacity-100"
           title={fullTimestamp}
         >
           {time}
