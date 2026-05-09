@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Attachment } from "../types";
-import { getAccessToken } from "../lib/api-client";
+import { apiClient } from "../lib/api-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 const SERVER_ORIGIN = API_BASE.replace(/\/api$/, "");
@@ -89,19 +89,15 @@ export function VoiceRecorder({ onSend, onCancel }: VoiceRecorderProps) {
         const formData = new FormData();
         formData.append("file", blobRef.current, "voice-message.webm");
 
-        const token = getAccessToken();
-        const headers: Record<string, string> = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
+        // Routed through apiClient for 401 auto-refresh — see avatar-picker
+        // for the same pattern and rationale.
+        const data = await apiClient.upload<{
+          url: string;
+          name: string;
+          size: string;
+          type: string;
+        }>("/upload", formData);
 
-        const res = await fetch(`${API_BASE}/upload`, {
-          method: "POST",
-          headers,
-          body: formData,
-        });
-
-        if (!res.ok) throw new Error("Upload failed");
-
-        const data = await res.json() as { url: string; name: string; size: string; type: string };
         const attachment: Attachment = {
           name: "Voice message",
           type: "voice",

@@ -4,9 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import Cropper, { Area } from "react-easy-crop";
 import { Modal } from "./modal";
 import { PRESET_AVATARS } from "../lib/avatars";
-import { getAccessToken } from "../lib/api-client";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
+import { apiClient } from "../lib/api-client";
 
 interface AvatarPickerProps {
   currentAvatarUrl?: string | null;
@@ -108,16 +106,13 @@ export function AvatarPicker({
       const formData = new FormData();
       formData.append("file", blob, fileName);
 
-      const token = getAccessToken();
-      const res = await fetch(`${API_BASE}/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error("Upload failed");
-
-      const data = await res.json();
+      // Routed through apiClient so an expired access token gets a silent
+      // /auth/refresh + retry instead of a hard 401. Previous raw fetch
+      // bypassed that and failed the moment the token aged out (~15 min).
+      const data = await apiClient.upload<{ url: string }>(
+        "/upload",
+        formData,
+      );
       setSelected(data.url);
       setCropImage(null);
     } catch {

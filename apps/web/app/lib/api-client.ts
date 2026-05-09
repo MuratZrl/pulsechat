@@ -97,9 +97,18 @@ async function apiFetch<T>(
 ): Promise<T> {
   const token = getAccessToken();
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
+  // Only default to application/json when the caller didn't override AND the
+  // body isn't FormData. The browser MUST set Content-Type itself for
+  // multipart/form-data so the boundary parameter lands correctly; setting
+  // it manually strips the boundary and breaks multer parsing on the server.
+  if (
+    !(options.body instanceof FormData) &&
+    !headers['Content-Type']
+  ) {
+    headers['Content-Type'] = 'application/json';
+  }
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -161,4 +170,11 @@ export const apiClient = {
       body: body ? JSON.stringify(body) : undefined,
       signal,
     }),
+  // Multipart upload — sends FormData as-is (no JSON.stringify, no
+  // Content-Type override) so the browser sets multipart/form-data with the
+  // proper boundary. Inherits apiFetch's 401 auto-refresh + single-flight
+  // refresh, so an expired access token is recovered transparently instead
+  // of failing the upload outright.
+  upload: <T>(path: string, formData: FormData, signal?: AbortSignal) =>
+    apiFetch<T>(path, { method: 'POST', body: formData, signal }),
 };

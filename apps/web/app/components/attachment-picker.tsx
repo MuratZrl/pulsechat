@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import { Attachment } from "../types";
-import { getAccessToken } from "../lib/api-client";
+import { apiClient } from "../lib/api-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
 const SERVER_ORIGIN = API_BASE.replace(/\/api$/, "");
@@ -39,27 +39,14 @@ export function AttachmentPicker({ onSelect, onClose }: AttachmentPickerProps) {
       const formData = new FormData();
       formData.append("file", file);
 
-      const token = getAccessToken();
-      const headers: Record<string, string> = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const res = await fetch(`${API_BASE}/upload`, {
-        method: "POST",
-        headers,
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: "Upload failed" }));
-        throw new Error(err.message ?? "Upload failed");
-      }
-
-      const data = await res.json() as {
+      // Routed through apiClient for 401 auto-refresh — see avatar-picker
+      // for the same pattern and rationale.
+      const data = await apiClient.upload<{
         url: string;
         name: string;
         size: string;
         type: "image" | "file" | "voice";
-      };
+      }>("/upload", formData);
 
       onSelect({
         name: data.name,
