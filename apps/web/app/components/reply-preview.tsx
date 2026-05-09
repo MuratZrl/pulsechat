@@ -56,9 +56,10 @@ export function ReplyPreviewBar({ replyingTo, onCancel }: ReplyPreviewBarProps) 
 
 interface ReplyQuoteProps {
   replyTo?: ReplyPreview | null;
+  currentUserId?: string;
 }
 
-export function ReplyQuote({ replyTo }: ReplyQuoteProps) {
+export function ReplyQuote({ replyTo, currentUserId }: ReplyQuoteProps) {
   if (!replyTo) {
     return (
       <div className="mb-1 border-l-2 border-text-secondary pl-2">
@@ -97,7 +98,12 @@ export function ReplyQuote({ replyTo }: ReplyQuoteProps) {
         {replyTo.senderName}
       </p>
       {renderAsMarkdown ? (
-        <FormattedText text={snippet} className="text-xs text-text-secondary" />
+        <FormattedText
+          text={snippet}
+          className="text-xs text-text-secondary"
+          mentions={replyTo.mentions}
+          currentUserId={currentUserId}
+        />
       ) : (
         <p
           className={`text-xs text-text-secondary ${isTombstone ? "italic" : ""}`}

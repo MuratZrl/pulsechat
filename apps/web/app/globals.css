@@ -123,6 +123,34 @@ body {
   border-radius: 2px;
 }
 
+/* Mention pills — applied post-DOMPurify by applyMentionPills in markdown.ts.
+   Indigo bg/text for mentions of others; data-self="true" swaps to amber so
+   the user can spot at a glance when they've been tagged. `display: inline`
+   keeps the pill flowing with surrounding text, wrapping naturally at line
+   breaks rather than forcing its own line. */
+.mention-pill {
+  display: inline;
+  background-color: rgba(99, 102, 241, 0.18);
+  color: var(--brand);
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+  font-weight: 500;
+}
+
+.dark .mention-pill {
+  /* Indigo-300 reads better than var(--brand) on the darker chat bg. */
+  color: rgb(165, 180, 252);
+}
+
+.mention-pill[data-self="true"] {
+  background-color: rgba(250, 204, 21, 0.22);
+  color: rgb(133, 77, 14); /* amber-800 */
+}
+
+.dark .mention-pill[data-self="true"] {
+  color: rgb(253, 224, 71); /* amber-300 */
+}
+
 /* emoji-mart picker theme overrides. emoji-mart exposes RGB triples for its
    accent/background/input/text colors and accepts a CSS color for borders.
    Values mirror the project's --sidebar-bg, --input-bg, --text-primary, and

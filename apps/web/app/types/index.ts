@@ -37,6 +37,7 @@ export interface ReplyPreview {
   text: string;
   senderName: string;
   attachment?: Attachment;
+  mentions?: Array<{ userId: string; userName: string }>;
 }
 
 export type Reactions = Record<string, string[]>; // emoji -> userIds[]
@@ -53,6 +54,7 @@ export interface Message {
   replyToId?: string;
   replyTo?: ReplyPreview;
   attachment?: Attachment;
+  mentions?: Array<{ userId: string; userName: string }>;
   forwarded?: {
     originalSender: string;
     originalRoom: string;

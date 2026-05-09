@@ -57,11 +57,13 @@ export class MessagesService {
     forwarded: unknown;
     sender: { id: string; name: string };
     reactions?: { emoji: string; userId: string }[];
+    mentions?: { userId: string; user: { name: string } }[];
     replyTo?: {
       id: string;
       text: string;
       isDeleted: boolean;
       attachment?: unknown;
+      mentions?: { userId: string; user: { name: string } }[];
       sender: { name: string };
     } | null;
   }) {
@@ -85,18 +87,41 @@ export class MessagesService {
             attachment: msg.replyTo.isDeleted
               ? undefined
               : (msg.replyTo.attachment ?? undefined),
+            // Strip mentions on tombstones for the same reason — no need to
+            // surface "this deleted message tagged you" via a stale pill.
+            mentions: msg.replyTo.isDeleted
+              ? []
+              : (msg.replyTo.mentions?.map((m) => ({
+                  userId: m.userId,
+                  userName: m.user.name,
+                })) ?? []),
             senderName: msg.replyTo.sender.name,
           }
         : undefined,
       attachment: msg.attachment ?? undefined,
       forwarded: msg.forwarded ?? undefined,
       reactions: this.buildReactionMap(msg.reactions ?? []),
+      // Resolved mentions for client-side pill rendering. Empty array on
+      // deleted messages — the body text is already cleared above.
+      mentions: msg.isDeleted
+        ? []
+        : (msg.mentions?.map((m) => ({
+            userId: m.userId,
+            userName: m.user.name,
+          })) ?? []),
     };
   }
 
   private readonly messageInclude = {
     sender: { select: { id: true, name: true } },
     reactions: { select: { emoji: true, userId: true } },
+    // Resolved mentions for the client renderer — already in DB from the
+    // sender path's regex+lookup, but the API was previously stripping them
+    // from the response. With these surfaced the FormattedText helper can
+    // render @name as a pill.
+    mentions: {
+      select: { userId: true, user: { select: { name: true } } },
+    },
     replyTo: {
       select: {
         id: true,
@@ -106,6 +131,11 @@ export class MessagesService {
         // GIFs/voice/image/file) and legacy "[GIF] {title}" captions can fall
         // through to a meaningful preview instead of a deleted placeholder.
         attachment: true,
+        // mentions surface here too so reply quotes get the same pill render
+        // as the parent body — Discord-parity, less visual inconsistency.
+        mentions: {
+          select: { userId: true, user: { select: { name: true } } },
+        },
         sender: { select: { name: true } },
       },
     },
@@ -202,25 +232,67 @@ export class MessagesService {
       include: this.messageInclude,
     });
 
-    // Parse @mentions and store them
-    const mentionPattern = /@(\w[\w ]*?\w|\w+)/g;
-    const mentionedNames = [...dto.text.matchAll(mentionPattern)].map((m) =>
-      m[1].toLowerCase(),
-    );
-    if (mentionedNames.length > 0) {
+    // Parse @mentions and store them.
+    //
+    // Capture the longest `@<word>(<space><word>)*` sequence at each @, then
+    // resolve to a user via longest-prefix lookup. The capture often extends
+    // past the actual name (e.g. "@Test User hi!" → "Test User hi"); we try
+    // "Test User hi", "Test User", "Test" and take the longest that maps to
+    // a real room member.
+    //
+    // The previous pattern `\w[\w ]*?\w|\w+` had a lazy quantifier that
+    // collapsed every @-name to its first two characters — "@Test User"
+    // captured as "Te", "@alice" as "al" — so no @-mention ever resolved
+    // and the Mention table stayed empty regardless of body content.
+    const mentionPattern = /@(\w+(?:\s\w+)*)/g;
+    const matches = [...dto.text.matchAll(mentionPattern)];
+
+    if (matches.length > 0) {
+      const candidatesByMatch: string[][] = matches.map((m) => {
+        const words = m[1].split(/\s+/);
+        return Array.from({ length: words.length }, (_, i) =>
+          words.slice(0, words.length - i).join(' '),
+        );
+      });
+      const allCandidates = [
+        ...new Set(
+          candidatesByMatch.flat().map((c) => c.toLowerCase()),
+        ),
+      ];
+
       const users = await this.prisma.user.findMany({
         where: {
-          name: { in: mentionedNames, mode: 'insensitive' },
+          name: { in: allCandidates, mode: 'insensitive' },
           id: { not: userId },
           rooms: { some: { roomId } },
         },
-        select: { id: true },
+        select: { id: true, name: true },
       });
+
       if (users.length > 0) {
-        await this.prisma.mention.createMany({
-          data: users.map((u) => ({ messageId: message.id, userId: u.id })),
-          skipDuplicates: true,
-        });
+        const userByLowerName = new Map(
+          users.map((u) => [u.name.toLowerCase(), u] as const),
+        );
+        const matchedUserIds = new Set<string>();
+        for (const candidates of candidatesByMatch) {
+          for (const candidate of candidates) {
+            const user = userByLowerName.get(candidate.toLowerCase());
+            if (user) {
+              matchedUserIds.add(user.id);
+              break;
+            }
+          }
+        }
+
+        if (matchedUserIds.size > 0) {
+          await this.prisma.mention.createMany({
+            data: [...matchedUserIds].map((uid) => ({
+              messageId: message.id,
+              userId: uid,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
     }
 

@@ -82,6 +82,64 @@ export function parseMarkdown(text: string): string {
   });
 }
 
+export interface MentionRef {
+  userId: string;
+  userName: string;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Wrap `@username` occurrences with a pill span. Runs on already-sanitized
+ * HTML (output of parseMarkdown), so DOMPurify doesn't need to learn about
+ * `<span>` — the inserted markup is fully constructed from server-validated
+ * data (userName comes from the User row, currentUserId from auth context).
+ *
+ * Names are sorted longest-first so a multi-word `@John Doe` matches before
+ * the shorter `@John` prefix would consume it. Matching is case-insensitive
+ * to mirror the backend's mention regex (User.name is case-insensitive
+ * unique). Self-mentions render with `data-self="true"` so the CSS can
+ * highlight them more strongly than mentions of others.
+ *
+ * Known limit: replacement runs over text segments split by HTML tags, with
+ * no awareness of `<code>`/`<pre>` context — `@username` inside a code block
+ * will render as a pill. Acceptable v1 trade-off; the alternative is a
+ * stateful HTML walk for an edge case nobody hits in practice.
+ */
+export function applyMentionPills(
+  html: string,
+  mentions: MentionRef[] | undefined,
+  currentUserId?: string,
+): string {
+  if (!mentions || mentions.length === 0) return html;
+
+  const sorted = [...mentions].sort(
+    (a, b) => b.userName.length - a.userName.length,
+  );
+
+  const parts = html.split(/(<[^>]+>)/);
+  return parts
+    .map((part) => {
+      if (part.startsWith("<")) return part;
+      let result = part;
+      for (const m of sorted) {
+        const isSelf = m.userId === currentUserId;
+        const pattern = new RegExp(`@${escapeRegExp(m.userName)}\\b`, "gi");
+        result = result.replace(pattern, (match) => {
+          // Preserve the case the sender typed rather than canonicalising
+          // to User.name — feels less jarring when @Alice and @ALICE both
+          // resolve to the same user.
+          const displayed = match.slice(1);
+          return `<span class="mention-pill" data-self="${isSelf}">@${escapeHtml(displayed)}</span>`;
+        });
+      }
+      return result;
+    })
+    .join("");
+}
+
 export function highlightText(html: string, query: string): string {
   if (!query || query.length < 1) return html;
 

@@ -275,7 +275,12 @@ export function MessageBubble({
         )}
 
         {/* Reply quote */}
-        {message.replyToId && <ReplyQuote replyTo={message.replyTo ?? null} />}
+        {message.replyToId && (
+          <ReplyQuote
+            replyTo={message.replyTo ?? null}
+            currentUserId={currentUserId}
+          />
+        )}
 
         {/* Message text or edit mode. The text container is a plain block so
             it inherits the full content-column width — no flex wrapper that
@@ -324,6 +329,8 @@ export function MessageBubble({
                 text={message.text}
                 className="text-sm break-words text-text-primary [&>p]:m-0 [&>p+p]:mt-1.5"
                 highlightQuery={searchQuery}
+                mentions={message.mentions}
+                currentUserId={currentUserId}
               />
               {isGrouped && message.editedAt && (
                 <span className="ml-1 text-[10px] text-text-secondary">
