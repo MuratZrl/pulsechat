@@ -51,12 +51,18 @@ export function RoomList({ onNavigate, onUnreadChange, searchInputRef }: RoomLis
   const roomsRef = useRef<Room[]>([]);
   roomsRef.current = rooms;
 
-  // Mark active room as read when navigating.
+  // Optimistically clear the active room's unread/mention badges on navigate.
+  // The actual API call (POST /rooms/:id/read) now lives in the chat page,
+  // deferred ~1.5s after mount or fired immediately on send. That decoupling
+  // lets the page snapshot the pre-advance lastReadAt for its unread
+  // separator without racing the mark-read write. If the user navigates
+  // away within the 1.5s window the API call won't fire and the next
+  // /rooms refresh will repopulate the badge — acceptable trade-off for
+  // instant visual feedback on click.
   useEffect(() => {
     const activeRoom = roomsRef.current.find((r) => pathname === `/chat/${r.id}`);
     if (!activeRoom) return;
     if ((activeRoom.unreadCount ?? 0) > 0 || (activeRoom.mentionCount ?? 0) > 0) {
-      apiClient.post(`/rooms/${activeRoom.id}/read`, {}).catch(console.error);
       setRooms((prev) =>
         prev.map((r) =>
           r.id === activeRoom.id ? { ...r, unreadCount: 0, mentionCount: 0 } : r

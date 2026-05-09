@@ -100,8 +100,8 @@ export class RoomsService {
     });
     if (!room) throw new NotFoundException('Room not found');
 
-    const isMember = room.members.some((m) => m.userId === userId);
-    if (!isMember) throw new ForbiddenException('Not a member of this room');
+    const myMembership = room.members.find((m) => m.userId === userId);
+    if (!myMembership) throw new ForbiddenException('Not a member of this room');
 
     const displayName =
       room.type === 'DM'
@@ -114,6 +114,11 @@ export class RoomsService {
       type: room.type,
       createdBy: room.createdById,
       createdAt: room.createdAt.toISOString(),
+      // The viewer's own RoomMember.lastReadAt — used by the chat page to
+      // anchor an unread-message separator above the first message newer
+      // than this timestamp. Snapshotted client-side on page load so the
+      // separator stays put even after the room's mark-read fires later.
+      lastReadAt: myMembership.lastReadAt.toISOString(),
       members: room.members.map((m) => ({
         userId: m.userId,
         name: m.user.name,

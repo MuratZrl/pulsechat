@@ -114,6 +114,41 @@ export default function ChatRoomPage({
   // Keyboard shortcuts
   const [showShortcuts, setShowShortcuts] = useState(false);
 
+  // Mark-read state. The snapshot is captured from /rooms/:id on initial
+  // mount and stays fixed for the page's lifetime so the unread separator
+  // stays anchored even after the server-side lastReadAt advances. firedRef
+  // makes the API call idempotent within a room visit; timerRef holds the
+  // deferred-fire setTimeout so cleanup can cancel it on fast navigate.
+  const [lastReadSnapshot, setLastReadSnapshot] = useState<string | null>(null);
+  const markReadFiredRef = useRef(false);
+  const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fireMarkRead = useCallback(() => {
+    if (markReadFiredRef.current) return;
+    markReadFiredRef.current = true;
+    if (markReadTimerRef.current) {
+      clearTimeout(markReadTimerRef.current);
+      markReadTimerRef.current = null;
+    }
+    apiClient.post(`/rooms/${roomId}/read`, {}).catch(console.error);
+  }, [roomId]);
+
+  // Deferred mark-read: 1.5s after the snapshot is captured. Cleanup on
+  // roomId/snapshot change cancels the pending fire if the user navigates
+  // away before the timer expires — covers the "open then immediately
+  // navigate" case where we want the room to stay unread.
+  useEffect(() => {
+    markReadFiredRef.current = false;
+    if (!lastReadSnapshot) return;
+    markReadTimerRef.current = setTimeout(fireMarkRead, 1500);
+    return () => {
+      if (markReadTimerRef.current) {
+        clearTimeout(markReadTimerRef.current);
+        markReadTimerRef.current = null;
+      }
+    };
+  }, [roomId, lastReadSnapshot, fireMarkRead]);
+
   // Reply count map (derived)
   const replyCountMap = useMemo(() => {
     const map: Record<string, number> = {};
@@ -152,12 +187,18 @@ export default function ChatRoomPage({
         name: string;
         type?: "CHANNEL" | "DM";
         members?: { userId: string; role: string }[];
+        lastReadAt?: string;
       }>(`/rooms/${roomId}`, signal)
       .then((room) => {
         setRoomName(room.name);
         setRoomType(room.type ?? "CHANNEL");
         // Populate in-memory role cache for badge rendering and canInvite checks
         if (room.members) setRoomRoles(roomId, room.members);
+        // Snapshot the lastReadAt for the unread separator. Captured here,
+        // before the deferred fireMarkRead can advance the server's value,
+        // so the marker boundary reflects "what was unread when I opened
+        // this room" rather than racing the mark-read API call.
+        if (room.lastReadAt) setLastReadSnapshot(room.lastReadAt);
       })
       .catch((err) => {
         if (!isAbort(err)) setRoomName("Unknown Room");
@@ -485,8 +526,11 @@ export default function ChatRoomPage({
         attachment: options?.attachment,
       });
       setReplyingTo(null);
+      // Sending implies the user has consumed prior context — fire mark-read
+      // immediately and cancel the deferred timer so we don't double-fire.
+      fireMarkRead();
     },
-    [roomId, user, socket]
+    [roomId, user, socket, fireMarkRead]
   );
 
   const handleEdit = useCallback(
@@ -895,6 +939,7 @@ export default function ChatRoomPage({
           starredIds={starredIds}
           pinnedIds={pinnedIds}
           onToggleReaction={handleToggleReaction}
+          lastReadAt={lastReadSnapshot}
         />
 
         {/* Typing indicator */}

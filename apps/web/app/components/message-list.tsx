@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { Message } from "../types";
 import { MessageBubble } from "./message-bubble";
 import { DateSeparator } from "./date-separator";
+import { UnreadSeparator } from "./unread-separator";
 import { ReadReceipt } from "./read-receipt-indicator";
 
 interface MessageListProps {
@@ -28,6 +29,10 @@ interface MessageListProps {
   starredIds?: string[];
   onToggleReaction?: (messageId: string, emoji: string) => void;
   pinnedIds?: string[];
+  // ISO timestamp snapshot of the viewer's RoomMember.lastReadAt at page
+  // mount. Stays fixed for the page's lifetime so the unread separator
+  // stays anchored even after the server-side mark-read fires.
+  lastReadAt?: string | null;
 }
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -59,6 +64,7 @@ export function MessageList({
   starredIds,
   onToggleReaction,
   pinnedIds,
+  lastReadAt,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -110,6 +116,22 @@ export function MessageList({
       setTimeout(() => el.classList.remove("highlight-flash"), 1500);
     }
   }, [scrollToMessageId]);
+
+  // Index of the first message that should sit BELOW the unread separator —
+  // first message newer than the snapshot, not deleted, not from the viewer.
+  // Self-sent messages don't trigger the separator (your own message above
+  // lastReadAt isn't "new" to you). -1 means "no separator anywhere".
+  const firstUnreadIdx = useMemo(() => {
+    if (!lastReadAt) return -1;
+    const lastReadDate = new Date(lastReadAt).getTime();
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg.isDeleted) continue;
+      if (msg.senderId === currentUserId) continue;
+      if (new Date(msg.createdAt).getTime() > lastReadDate) return i;
+    }
+    return -1;
+  }, [messages, currentUserId, lastReadAt]);
 
   if (messages.length === 0 && !isLoadingMore) {
     return (
@@ -176,6 +198,11 @@ export function MessageList({
               {showSeparator && (
                 <div className="px-4">
                   <DateSeparator date={msg.createdAt} />
+                </div>
+              )}
+              {idx === firstUnreadIdx && (
+                <div className="px-4">
+                  <UnreadSeparator />
                 </div>
               )}
               <MessageBubble
