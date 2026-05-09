@@ -24,7 +24,7 @@ describe('MessagesService', () => {
       replyToId: null,
       attachment: null,
       forwarded: null,
-      sender: { id: 'u1', name: 'Alice' },
+      sender: { id: 'u1', name: 'Alice', avatarUrl: null, avatarPreset: null },
       reactions: [],
       replyTo: null,
       ...overrides,

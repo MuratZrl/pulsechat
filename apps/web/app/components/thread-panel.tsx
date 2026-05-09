@@ -62,7 +62,12 @@ export function ThreadPanel({
       {/* Parent message */}
       <div className="border-b border-border p-3">
         <div className="mb-1.5 flex items-center gap-2">
-          <Avatar name={parentMessage.senderName} size="sm" />
+          <Avatar
+            name={parentMessage.senderName}
+            size="sm"
+            avatarUrl={parentMessage.senderAvatarUrl}
+            avatarPreset={parentMessage.senderAvatarPreset}
+          />
           <span className="text-xs font-medium text-text-primary">
             {parentMessage.senderName}
           </span>
@@ -90,7 +95,12 @@ export function ThreadPanel({
               );
               return (
                 <div key={reply.id} className="flex items-start gap-2">
-                  <Avatar name={reply.senderName} size="sm" />
+                  <Avatar
+                    name={reply.senderName}
+                    size="sm"
+                    avatarUrl={reply.senderAvatarUrl}
+                    avatarPreset={reply.senderAvatarPreset}
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-xs font-medium text-text-primary">

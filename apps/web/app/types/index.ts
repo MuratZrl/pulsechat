@@ -44,6 +44,10 @@ export interface ReplyPreview {
   id: string;
   text: string;
   senderName: string;
+  // Avatar fields are flat (mirroring Message.senderAvatar*) so render sites
+  // can pipe them into <Avatar> the same way as on the parent bubble.
+  senderAvatarUrl?: string | null;
+  senderAvatarPreset?: string | null;
   attachment?: Attachment;
   mentions?: Array<{ userId: string; userName: string }>;
 }
@@ -55,6 +59,11 @@ export interface Message {
   roomId: string;
   senderId: string;
   senderName: string;
+  // Sender avatar fields. Flat alongside senderName because the wire format
+  // is additive — older clients without these fields still work, and the
+  // shared <Avatar> falls back to colored initials when both are nullish.
+  senderAvatarUrl?: string | null;
+  senderAvatarPreset?: string | null;
   text: string;
   createdAt: string;
   editedAt?: string;

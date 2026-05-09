@@ -128,7 +128,12 @@ export function MessageBubble({
         className="flex w-10 flex-shrink-0 cursor-pointer pt-0.5"
         aria-label={`Open ${message.senderName}'s profile`}
       >
-        <Avatar name={message.senderName} size="md" />
+        <Avatar
+          name={message.senderName}
+          size="md"
+          avatarUrl={message.senderAvatarUrl}
+          avatarPreset={message.senderAvatarPreset}
+        />
       </button>
     );
 

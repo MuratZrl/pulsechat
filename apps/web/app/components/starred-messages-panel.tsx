@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Avatar } from "./avatar";
 import { apiClient } from "../lib/api-client";
 
 interface StarredEntry {
@@ -12,6 +13,8 @@ interface StarredEntry {
     id: string;
     text: string;
     senderName: string;
+    senderAvatarUrl?: string | null;
+    senderAvatarPreset?: string | null;
   };
 }
 
@@ -110,9 +113,17 @@ export function StarredMessagesPanel({
                   </button>
                 </div>
               </div>
-              <p className="text-[10px] font-medium text-text-secondary">
-                {item.message.senderName}
-              </p>
+              <div className="mt-1 flex items-center gap-1.5">
+                <Avatar
+                  name={item.message.senderName}
+                  size="sm"
+                  avatarUrl={item.message.senderAvatarUrl}
+                  avatarPreset={item.message.senderAvatarPreset}
+                />
+                <p className="text-[10px] font-medium text-text-secondary">
+                  {item.message.senderName}
+                </p>
+              </div>
               <p className="mt-0.5 line-clamp-2 text-xs text-text-primary">
                 {item.message.text}
               </p>

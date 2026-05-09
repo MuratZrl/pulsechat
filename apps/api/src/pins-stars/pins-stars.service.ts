@@ -102,7 +102,9 @@ export class PinsStarsService {
             text: true,
             isDeleted: true,
             senderId: true,
-            sender: { select: { name: true } },
+            sender: {
+              select: { name: true, avatarUrl: true, avatarPreset: true },
+            },
           },
         },
         room: { select: { id: true, name: true, type: true } },
@@ -120,6 +122,11 @@ export class PinsStarsService {
           id: s.message.id,
           text: s.message.text,
           senderName: s.message.sender.name,
+          // Flat avatar fields mirror the message payload shape elsewhere.
+          // Frontend StarredMessagesPanel uses them to render the author's
+          // avatar next to the senderName — was text-only before.
+          senderAvatarUrl: s.message.sender.avatarUrl,
+          senderAvatarPreset: s.message.sender.avatarPreset,
         },
       }));
   }

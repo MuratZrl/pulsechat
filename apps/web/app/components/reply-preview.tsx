@@ -1,4 +1,5 @@
 import { Attachment, Message, ReplyPreview } from "../types";
+import { Avatar } from "./avatar";
 import { FormattedText } from "./formatted-text";
 
 // Build a one-line label for a parent message that has no usable text body —
@@ -36,11 +37,19 @@ export function ReplyPreviewBar({ replyingTo, onCancel }: ReplyPreviewBarProps) 
 
   return (
     <div className="flex items-center justify-between border-t border-border bg-sidebar px-4 py-2">
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-indigo-400">
-          Replying to {replyingTo.senderName}
-        </p>
-        <p className="truncate text-xs text-text-secondary">{snippet}</p>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <Avatar
+          name={replyingTo.senderName}
+          size="sm"
+          avatarUrl={replyingTo.senderAvatarUrl}
+          avatarPreset={replyingTo.senderAvatarPreset}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-indigo-400">
+            Replying to {replyingTo.senderName}
+          </p>
+          <p className="truncate text-xs text-text-secondary">{snippet}</p>
+        </div>
       </div>
       <button
         onClick={onCancel}
@@ -94,9 +103,17 @@ export function ReplyQuote({ replyTo, currentUserId }: ReplyQuoteProps) {
 
   return (
     <div className="mb-1 border-l-2 border-indigo-400 pl-2">
-      <p className="text-[10px] font-medium text-indigo-400">
-        {replyTo.senderName}
-      </p>
+      <div className="flex items-center gap-1.5">
+        <Avatar
+          name={replyTo.senderName}
+          size="sm"
+          avatarUrl={replyTo.senderAvatarUrl}
+          avatarPreset={replyTo.senderAvatarPreset}
+        />
+        <p className="text-[10px] font-medium text-indigo-400">
+          {replyTo.senderName}
+        </p>
+      </div>
       {renderAsMarkdown ? (
         <FormattedText
           text={snippet}

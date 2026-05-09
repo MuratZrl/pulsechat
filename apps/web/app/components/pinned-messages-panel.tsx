@@ -95,7 +95,12 @@ export function PinnedMessagesPanel({
               >
                 {/* Author row */}
                 <div className="mb-2 flex items-center gap-2">
-                  <Avatar name={msg.senderName} size="sm" />
+                  <Avatar
+                    name={msg.senderName}
+                    size="sm"
+                    avatarUrl={msg.senderAvatarUrl}
+                    avatarPreset={msg.senderAvatarPreset}
+                  />
                   <span className="text-xs font-semibold text-text-primary">
                     {msg.senderName}
                   </span>

@@ -55,7 +55,12 @@ export class MessagesService {
     replyToId: string | null;
     attachment: unknown;
     forwarded: unknown;
-    sender: { id: string; name: string };
+    sender: {
+      id: string;
+      name: string;
+      avatarUrl: string | null;
+      avatarPreset: string | null;
+    };
     reactions?: { emoji: string; userId: string }[];
     mentions?: { userId: string; user: { name: string } }[];
     replyTo?: {
@@ -64,7 +69,11 @@ export class MessagesService {
       isDeleted: boolean;
       attachment?: unknown;
       mentions?: { userId: string; user: { name: string } }[];
-      sender: { name: string };
+      sender: {
+        name: string;
+        avatarUrl: string | null;
+        avatarPreset: string | null;
+      };
     } | null;
   }) {
     return {
@@ -72,6 +81,13 @@ export class MessagesService {
       roomId: msg.roomId,
       senderId: msg.senderId,
       senderName: msg.sender.name,
+      // Sender avatar fields are flat alongside senderId/senderName so the
+      // wire format stays additive — frontends that don't yet read them just
+      // ignore extra keys, and the existing message-bubble path keeps working
+      // unchanged. Tombstones ship the avatar too: a deleted message still
+      // renders the author's gutter row, just with empty body text.
+      senderAvatarUrl: msg.sender.avatarUrl,
+      senderAvatarPreset: msg.sender.avatarPreset,
       text: msg.isDeleted ? '' : msg.text,
       createdAt: msg.createdAt.toISOString(),
       editedAt: msg.editedAt?.toISOString(),
@@ -96,6 +112,8 @@ export class MessagesService {
                   userName: m.user.name,
                 })) ?? []),
             senderName: msg.replyTo.sender.name,
+            senderAvatarUrl: msg.replyTo.sender.avatarUrl,
+            senderAvatarPreset: msg.replyTo.sender.avatarPreset,
           }
         : undefined,
       attachment: msg.attachment ?? undefined,
@@ -113,7 +131,9 @@ export class MessagesService {
   }
 
   private readonly messageInclude = {
-    sender: { select: { id: true, name: true } },
+    sender: {
+      select: { id: true, name: true, avatarUrl: true, avatarPreset: true },
+    },
     reactions: { select: { emoji: true, userId: true } },
     // Resolved mentions for the client renderer — already in DB from the
     // sender path's regex+lookup, but the API was previously stripping them
@@ -136,7 +156,11 @@ export class MessagesService {
         mentions: {
           select: { userId: true, user: { select: { name: true } } },
         },
-        sender: { select: { name: true } },
+        // Avatar fields on the reply target so ReplyQuote can render the
+        // original author's avatar instead of just their name.
+        sender: {
+          select: { name: true, avatarUrl: true, avatarPreset: true },
+        },
       },
     },
   };
