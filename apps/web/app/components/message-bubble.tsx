@@ -291,7 +291,12 @@ export function MessageBubble({
             </div>
           </div>
         ) : (
-          message.text && (
+          // Suppress the body when the message is a GIF. New GIF sends use
+          // an empty body, but legacy data carries a "[GIF] {title}" caption
+          // written by the pre-GIPHY sender path; both should collapse to
+          // "no caption" so only the image renders. The title still surfaces
+          // via the <img alt> on the GIF below.
+          message.text && message.attachment?.size !== "GIF" && (
             <div className="text-sm leading-snug text-text-primary break-words">
               {/* `[&>p]:m-0` strips marked's default 1em paragraph margins
                   (~14px top + 14px bottom at text-sm) which were inflating
@@ -316,12 +321,18 @@ export function MessageBubble({
           <VoicePlayer attachment={message.attachment} isOwn={false} />
         ) : message.attachment && message.attachment.size === "GIF" ? (
           message.attachment.url?.startsWith("http") ? (
-            // Real GIF (GIPHY) — render as an image.
+            // Real GIF (GIPHY) — render as an image. `block` is load-bearing:
+            // an inline img with loading="lazy" reports h=0 until it enters
+            // the viewport, but its parent's line-box still reserves
+            // ~24px of strut height (inherited line-height) plus the 4px
+            // mt-1, padding the row with ~28px of phantom space until the
+            // image lays out. As a block element it skips the line-box
+            // entirely and contributes only its own height + mt-1.
             <img
               src={message.attachment.url}
               alt={message.attachment.name || "GIF"}
               loading="lazy"
-              className="mt-1 max-h-64 max-w-xs rounded-md object-contain"
+              className="mt-1 block max-h-64 max-w-xs rounded-md object-contain"
             />
           ) : (
             // Legacy fallback for messages stored before the GIPHY swap, when
