@@ -232,7 +232,7 @@ export class RoomsService {
   async getUsers(currentUserId: string) {
     return this.prisma.user.findMany({
       where: { id: { not: currentUserId } },
-      select: { id: true, name: true, avatarUrl: true },
+      select: { id: true, name: true, avatarUrl: true, avatarPreset: true },
       orderBy: { name: 'asc' },
     });
   }

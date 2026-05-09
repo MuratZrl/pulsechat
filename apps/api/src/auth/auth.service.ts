@@ -185,7 +185,8 @@ export class AuthService {
       where: { id: userId },
       select: {
         id: true, name: true, email: true, bio: true,
-        avatarUrl: true, emailVerified: true, createdAt: true,
+        avatarUrl: true, avatarPreset: true,
+        emailVerified: true, createdAt: true,
       },
     });
   }

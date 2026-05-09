@@ -385,7 +385,9 @@ export class ChatGateway
     const members = await this.prisma.roomMember.findMany({
       where: { roomId },
       include: {
-        user: { select: { id: true, name: true, avatarUrl: true } },
+        user: {
+          select: { id: true, name: true, avatarUrl: true, avatarPreset: true },
+        },
       },
     });
 
@@ -393,6 +395,7 @@ export class ChatGateway
       id: m.user.id,
       name: m.user.name,
       avatarUrl: m.user.avatarUrl,
+      avatarPreset: m.user.avatarPreset,
       status: onlineUserIds.has(m.user.id)
         ? ('online' as const)
         : ('offline' as const),

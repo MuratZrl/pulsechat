@@ -23,6 +23,7 @@ describe('Users updateProfile validation (e2e)', () => {
     email: string;
     bio: string | null;
     avatarUrl: string | null;
+    avatarPreset: string | null;
     createdAt: Date;
   };
 
@@ -55,6 +56,7 @@ describe('Users updateProfile validation (e2e)', () => {
             if (select.email) out.email = u.email;
             if (select.bio) out.bio = u.bio;
             if (select.avatarUrl) out.avatarUrl = u.avatarUrl;
+            if (select.avatarPreset) out.avatarPreset = u.avatarPreset;
             if (select.createdAt) out.createdAt = u.createdAt;
             return out;
           }
@@ -67,7 +69,12 @@ describe('Users updateProfile validation (e2e)', () => {
           data,
         }: {
           where: { id: string };
-          data: { name?: string; bio?: string; avatarUrl?: string | null };
+          data: {
+            name?: string;
+            bio?: string;
+            avatarUrl?: string | null;
+            avatarPreset?: string | null;
+          };
         }) => {
           const u = users.get(where.id);
           if (!u) {
@@ -89,12 +96,14 @@ describe('Users updateProfile validation (e2e)', () => {
           if (data.name !== undefined) u.name = data.name;
           if (data.bio !== undefined) u.bio = data.bio;
           if (data.avatarUrl !== undefined) u.avatarUrl = data.avatarUrl;
+          if (data.avatarPreset !== undefined) u.avatarPreset = data.avatarPreset;
           return {
             id: u.id,
             name: u.name,
             email: u.email,
             bio: u.bio,
             avatarUrl: u.avatarUrl,
+            avatarPreset: u.avatarPreset,
             createdAt: u.createdAt,
           };
         },
@@ -130,6 +139,7 @@ describe('Users updateProfile validation (e2e)', () => {
       email: 'a@example.com',
       bio: null,
       avatarUrl: null,
+      avatarPreset: null,
       createdAt: new Date('2026-01-01T00:00:00Z'),
     });
     users.set('user-B', {
@@ -138,6 +148,7 @@ describe('Users updateProfile validation (e2e)', () => {
       email: 'b@example.com',
       bio: null,
       avatarUrl: null,
+      avatarPreset: null,
       createdAt: new Date('2026-01-01T00:00:00Z'),
     });
 
@@ -282,6 +293,53 @@ describe('Users updateProfile validation (e2e)', () => {
       .send({ avatarUrl: null })
       .expect(200);
     expect(res.body.avatarUrl).toBeNull();
+  });
+
+  // ── Avatar preset ────────────────────────────────────────────────────────
+
+  it('accepts a valid avatarPreset and clears avatarUrl when sent together', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/api/users/me')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ avatarPreset: 'fox', avatarUrl: null })
+      .expect(200);
+    expect(res.body.avatarPreset).toBe('fox');
+    expect(res.body.avatarUrl).toBeNull();
+  });
+
+  it('rejects an unknown avatarPreset value', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/api/users/me')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ avatarPreset: 'lobster' })
+      .expect(400);
+    const messages = Array.isArray(res.body.message)
+      ? res.body.message
+      : [res.body.message];
+    expect(messages.join(' ')).toContain('avatarPreset');
+  });
+
+  it('rejects when both avatarUrl and avatarPreset are set non-null', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/api/users/me')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({
+        avatarUrl: `${R2_PUBLIC_URL}/avatars/abc.png`,
+        avatarPreset: 'cat',
+      })
+      .expect(400);
+    expect(res.body.message).toBe(
+      'Cannot set both avatarUrl and avatarPreset — choose one',
+    );
+  });
+
+  it('accepts a null avatarPreset as a clear signal', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/api/users/me')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ avatarPreset: null })
+      .expect(200);
+    expect(res.body.avatarPreset).toBeNull();
   });
 
   // ── Bio length ───────────────────────────────────────────────────────────

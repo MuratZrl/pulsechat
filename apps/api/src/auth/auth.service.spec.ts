@@ -571,6 +571,7 @@ describe('AuthService', () => {
         email: 'john@example.com',
         bio: null,
         avatarUrl: null,
+        avatarPreset: null,
         emailVerified: false,
         createdAt: new Date('2025-01-01'),
       };
@@ -587,6 +588,7 @@ describe('AuthService', () => {
           email: true,
           bio: true,
           avatarUrl: true,
+          avatarPreset: true,
           emailVerified: true,
           createdAt: true,
         },

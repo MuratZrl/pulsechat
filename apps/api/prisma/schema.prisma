@@ -25,6 +25,10 @@ model User {
   passwordHash  String
   bio           String            @default("")
   avatarUrl     String?
+  // Identifier of a built-in preset avatar (e.g. "cat", "fox"). Mutually
+  // exclusive with avatarUrl at the application layer — see UsersService.
+  // No DB-level enum so adding a new preset is a frontend-only change.
+  avatarPreset  String?
   emailVerified Boolean           @default(false)
   createdAt     DateTime          @default(now())
   rooms        RoomMember[]
