@@ -1,11 +1,10 @@
-import { IsString, MinLength, MaxLength } from 'class-validator';
+import { IsString } from 'class-validator';
+import { IsStrongPassword } from '../password-rules';
 
 export class ResetPasswordDto {
   @IsString()
   token: string;
 
-  @IsString()
-  @MinLength(6)
-  @MaxLength(128)
+  @IsStrongPassword()
   newPassword: string;
 }

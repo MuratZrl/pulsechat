@@ -257,6 +257,31 @@ describe('AuthService', () => {
 
       await expect(service.register(registerDto)).rejects.toBe(boom);
     });
+
+    // ── Bug 3: case-insensitive email lookups ────────────────────────────────
+    // RegisterDto's @Transform lowercases+trims email before the service
+    // sees it. These tests pass the post-transform value (what the
+    // ValidationPipe would hand to the controller) and assert the service
+    // queries with that lowercased form so a re-registration with a
+    // case-variant collides on the unique index.
+
+    it('should treat a re-registration with a case-variant email as a conflict (post-transform)', async () => {
+      // Simulates RegisterDto receiving "FOO@EXAMPLE.COM" — by the time
+      // service.register runs, @Transform has already lowercased it.
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+
+      await expect(
+        service.register({
+          name: 'Other Person',
+          email: 'foo@example.com',
+          password: 'Password1!',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+        where: { email: 'foo@example.com' },
+      });
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
   });
 
   // ── Login ─────────────────────────────────────────────────────────────────────
@@ -322,6 +347,27 @@ describe('AuthService', () => {
       await expect(service.login(loginDto)).rejects.toThrow(
         'Invalid credentials',
       );
+    });
+
+    it('should look up the user by the post-transform lowercase email (Bug 3)', async () => {
+      // LoginDto's @Transform normalizes email to lowercase before the
+      // service runs, so a user who registered as Foo@Example.com (stored
+      // as foo@example.com) is found when the user types Foo@Example.com
+      // at login. The service guarantee here is that whatever email it
+      // receives is what it queries with — DTO transform tests in
+      // auth.dto.spec.ts cover the lowercasing itself.
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      const result = await service.login({
+        email: 'foo@example.com',
+        password: 'Password1!',
+      });
+
+      expect(result.user.id).toBe(mockUser.id);
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+        where: { email: 'foo@example.com' },
+      });
     });
   });
 

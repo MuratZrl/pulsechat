@@ -654,9 +654,17 @@ export default function ChatRoomPage({
     const file = e.dataTransfer.files[0];
     if (!file) return;
 
+    // Drag-drop is image-only because the preview modal renders an <img>;
+    // PDFs/audio/text are still uploadable through the attachment picker.
+    // Widening this list would require a generic preview component, which
+    // is out of scope here.
     const validTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
     if (!validTypes.includes(file.type)) return;
 
+    // The data URL is for in-modal preview only — the actual upload to R2
+    // happens inside ImagePreviewModal via apiClient.upload before
+    // send_message fires. Sending the data: URL through the socket fails
+    // the server's URL whitelist.
     const reader = new FileReader();
     reader.onload = () => {
       setDragPreview({ file, dataUrl: reader.result as string });
@@ -962,10 +970,15 @@ export default function ChatRoomPage({
             file={dragPreview.file}
             dataUrl={dragPreview.dataUrl}
             onSend={(attachment) => {
-              handleSend(`Sent ${attachment.name}`, { attachment });
+              // Empty body for images — mirrors message-input.tsx's
+              // skipLabel convention (Discord-style: an inline image renders
+              // alone, no "Sent foo.png" caption above it). Drag-drop is
+              // image-only so this branch never needs the file caption.
+              handleSend("", { attachment });
               setDragPreview(null);
             }}
             onCancel={() => setDragPreview(null)}
+            onError={(message) => showToast(message, "error")}
           />
         )}
       </div>

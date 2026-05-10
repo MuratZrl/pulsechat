@@ -1,4 +1,13 @@
-import { IsEmail, IsString, IsNotEmpty, MinLength, MaxLength, Matches } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  IsNotEmpty,
+  MinLength,
+  MaxLength,
+  Matches,
+} from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsStrongPassword } from '../password-rules';
 
 export class RegisterDto {
   @IsString()
@@ -10,14 +19,15 @@ export class RegisterDto {
   })
   name: string;
 
+  // Lowercase + trim so a single email can't register twice with different
+  // casing (Foo@x.com vs foo@x.com). The DB index is a plain B-tree, so the
+  // normalization MUST happen before the unique check at insert time.
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase().trim() : value,
+  )
   @IsEmail()
   email: string;
 
-  @IsString()
-  @MinLength(6)
-  @MaxLength(128)
-  @Matches(/^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/, {
-    message: 'Password must contain at least one uppercase letter, one number, and one special character',
-  })
+  @IsStrongPassword()
   password: string;
 }
