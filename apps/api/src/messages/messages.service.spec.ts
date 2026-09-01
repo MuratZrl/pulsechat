@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { MessagesService } from './messages.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 
 describe('MessagesService', () => {
   let service: MessagesService;
@@ -65,6 +66,13 @@ describe('MessagesService', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: jest.fn().mockReturnValue('https://test-r2.example'),
+          },
+        },
+        {
+          provide: RedisService,
+          useValue: {
+            incr: jest.fn().mockResolvedValue(1),
+            expire: jest.fn(),
           },
         },
       ],

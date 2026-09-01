@@ -90,7 +90,7 @@ describe('RoomsService', () => {
         createdById: 'u1',
         createdAt: now,
         members: [
-          { userId: 'u1', role: 'admin', joinedAt: now, user: { id: 'u1', name: 'Alice' } },
+          { userId: 'u1', role: 'admin', joinedAt: now, lastReadAt: now, user: { id: 'u1', name: 'Alice' } },
         ],
       });
 
