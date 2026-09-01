@@ -11,25 +11,24 @@ jobs:
     name: API Tests & Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Must precede setup-node so `cache: pnpm` can resolve the store path.
       - uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
-          # apps/api has no committed lockfile; key the cache on package.json.
-          cache-dependency-path: apps/api/package.json
+          cache-dependency-path: apps/api/pnpm-lock.yaml
 
-      # pnpm implies --frozen-lockfile under CI, which errors with no lockfile.
       - name: Install dependencies
         working-directory: apps/api
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
+      # pnpm 10 skips postinstall scripts, so this step is required.
       - name: Generate Prisma client
         working-directory: apps/api
         run: pnpm exec prisma generate
@@ -50,13 +49,13 @@ jobs:
     name: Web Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
