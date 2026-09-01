@@ -13,31 +13,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Must precede setup-node so `cache: pnpm` can resolve the store path.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: apps/api/package-lock.json
+          cache: pnpm
+          # apps/api has no committed lockfile; key the cache on package.json.
+          cache-dependency-path: apps/api/package.json
 
+      # pnpm implies --frozen-lockfile under CI, which errors with no lockfile.
       - name: Install dependencies
         working-directory: apps/api
-        run: npm ci
+        run: pnpm install --no-frozen-lockfile
 
       - name: Generate Prisma client
         working-directory: apps/api
-        run: npx prisma generate
+        run: pnpm exec prisma generate
 
       - name: Run unit tests
         working-directory: apps/api
-        run: npm test
+        run: pnpm test
 
       - name: Run e2e tests
         working-directory: apps/api
-        run: npm run test:e2e
+        run: pnpm run test:e2e
 
       - name: Build
         working-directory: apps/api
-        run: npm run build
+        run: pnpm run build
 
   build-web:
     name: Web Build
@@ -45,16 +52,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: apps/web
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         working-directory: apps/web
-        run: npm run build
+        run: pnpm run build
