@@ -86,6 +86,33 @@ function getOrCreateRefresh(): Promise<boolean> {
   return refreshPromise;
 }
 
+// Exposed for the socket, which learns about an expired access token from
+// its connect_error instead of a 401. Shares the single-flight promise so a
+// socket reconnect and a parallel HTTP 401 still send one /auth/refresh.
+export function refreshAccessToken(): Promise<boolean> {
+  return getOrCreateRefresh();
+}
+
+// Session is unrecoverable (refresh failed): drop tokens and send the user
+// to /login. Only redirect if we're NOT already on an auth page. Without
+// this guard, landing on /login with no token causes a hard reload loop that
+// resets the page (and DevTools) every time the snackbar appears.
+export function expireSession() {
+  clearTokens();
+  if (typeof window !== 'undefined') {
+    const currentPath = window.location.pathname;
+    const isOnAuthPage =
+      currentPath.startsWith('/login') ||
+      currentPath.startsWith('/register') ||
+      currentPath.startsWith('/forgot-password') ||
+      currentPath.startsWith('/reset-password') ||
+      currentPath.startsWith('/verify-email');
+    if (!isOnAuthPage) {
+      window.location.href = '/login';
+    }
+  }
+}
+
 // ─── Core fetch wrapper ────────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -121,22 +148,7 @@ async function apiFetch<T>(
       // retry=false guards against an infinite loop if the retry itself 401s.
       return apiFetch<T>(path, options, false);
     }
-    clearTokens();
-    // Only redirect if we're NOT already on an auth page. Without this guard,
-    // landing on /login with no token causes a hard reload loop that resets
-    // the page (and DevTools) every time the snackbar appears.
-    if (typeof window !== 'undefined') {
-      const currentPath = window.location.pathname;
-      const isOnAuthPage =
-        currentPath.startsWith('/login') ||
-        currentPath.startsWith('/register') ||
-        currentPath.startsWith('/forgot-password') ||
-        currentPath.startsWith('/reset-password') ||
-        currentPath.startsWith('/verify-email');
-      if (!isOnAuthPage) {
-        window.location.href = '/login';
-      }
-    }
+    expireSession();
     throw new Error('Unauthorized');
   }
 

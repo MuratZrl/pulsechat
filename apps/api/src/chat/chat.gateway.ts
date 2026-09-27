@@ -122,7 +122,19 @@ export class ChatGateway
         this.logger.warn(
           `WS auth rejected: ${err instanceof Error ? err.message : 'unknown error'}`,
         );
-        next(new Error('Unauthorized'));
+        // Socket.io forwards `data` to the client's connect_error. Flag an
+        // expired access token so the client can refresh it and reconnect;
+        // a middleware rejection otherwise leaves the client socket inactive.
+        const rejection: Error & { data?: { code: string } } = new Error(
+          'Unauthorized',
+        );
+        rejection.data = {
+          code:
+            err instanceof Error && err.name === 'TokenExpiredError'
+              ? 'TOKEN_EXPIRED'
+              : 'UNAUTHORIZED',
+        };
+        next(rejection);
       }
     });
   }

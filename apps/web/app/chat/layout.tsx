@@ -22,7 +22,7 @@ export default function ChatLayout({
   const { showToast } = useToast();
   const router = useRouter();
   // Initialize singleton socket connection as soon as user is authenticated
-  useSocket();
+  const { isReconnecting } = useSocket();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [totalUnread, setTotalUnread] = useState(0);
@@ -76,6 +76,16 @@ export default function ChatLayout({
               Resend verification email
             </button>
           )}
+        </div>
+      )}
+      {/* Connection-lost indicator — live events pause while the socket retries */}
+      {isReconnecting && (
+        <div
+          role="status"
+          className="flex items-center justify-center gap-2 bg-hover px-4 py-1 text-xs text-text-secondary"
+        >
+          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+          Reconnecting…
         </div>
       )}
       <div className="flex flex-1 overflow-hidden">

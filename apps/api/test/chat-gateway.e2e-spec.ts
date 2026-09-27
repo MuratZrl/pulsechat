@@ -384,4 +384,27 @@ describe('Chat gateway authorization (e2e)', () => {
     const err = await errPromise;
     expect(err).toBeNull();
   });
+
+  it('flags an expired access token so the client can refresh and reconnect', async () => {
+    const jwt = app.get(JwtService);
+    const expired = await jwt.signAsync(
+      {
+        sub: 'user-A',
+        email: 'a@example.com',
+        exp: Math.floor(Date.now() / 1000) - 60,
+      },
+      { secret: process.env.JWT_SECRET },
+    );
+
+    const err = await connectClient(expired).then(
+      (sock) => {
+        sock.disconnect();
+        return null;
+      },
+      (e: Error & { data?: { code?: string } }) => e,
+    );
+    expect(err).not.toBeNull();
+    expect(err!.message).toBe('Unauthorized');
+    expect(err!.data?.code).toBe('TOKEN_EXPIRED');
+  });
 });
