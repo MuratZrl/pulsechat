@@ -28,9 +28,11 @@ import {
 import {
   Injectable,
   Logger,
+  UseFilters,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
+import { WsErrorFilter } from './ws-error.filter';
 import { SkipThrottle } from '@nestjs/throttler';
 
 interface AuthSocket extends Socket {
@@ -57,6 +59,7 @@ interface AuthSocket extends Socket {
     exceptionFactory: () => new WsException('Invalid payload'),
   }),
 )
+@UseFilters(new WsErrorFilter())
 export class ChatGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
 {
@@ -247,44 +250,40 @@ export class ChatGateway
     if (!(await this.checkRateLimit(client.userId, 'msg', 30))) {
       throw new WsException('Rate limit exceeded — slow down');
     }
-    try {
-      const { roomId, ...dto } = data;
-      const message = await this.messagesService.sendMessage(
+    const { roomId, ...dto } = data;
+    const message = await this.messagesService.sendMessage(
+      roomId,
+      client.userId,
+      dto,
+      client.userName,
+    );
+    this.server.to(roomId).emit('new_message', message);
+
+    // Notify mentioned users via their per-user room. (The previous
+    // `if (message.reactions !== undefined)` guard was dead code — the
+    // formatter always returns a reactions field — and the emit targeted
+    // a room named after the userId that no socket had joined, so mention
+    // events never reached the client.)
+    //
+    // Self-mention rows exist in DB now (the renderer needs them to paint
+    // the author's own @-name as a pill), but we still skip the
+    // notification emit for the author's own row — they shouldn't get a
+    // toast/sound for tagging themselves.
+    const mentions = await this.prisma.mention.findMany({
+      where: { messageId: message.id },
+      select: { userId: true },
+    });
+    for (const { userId: mentionedUserId } of mentions) {
+      if (mentionedUserId === client.userId) continue;
+      this.server.to(`user:${mentionedUserId}`).emit('mention', {
         roomId,
-        client.userId,
-        dto,
-        client.userName,
-      );
-      this.server.to(roomId).emit('new_message', message);
-
-      // Notify mentioned users via their per-user room. (The previous
-      // `if (message.reactions !== undefined)` guard was dead code — the
-      // formatter always returns a reactions field — and the emit targeted
-      // a room named after the userId that no socket had joined, so mention
-      // events never reached the client.)
-      //
-      // Self-mention rows exist in DB now (the renderer needs them to paint
-      // the author's own @-name as a pill), but we still skip the
-      // notification emit for the author's own row — they shouldn't get a
-      // toast/sound for tagging themselves.
-      const mentions = await this.prisma.mention.findMany({
-        where: { messageId: message.id },
-        select: { userId: true },
+        messageId: message.id,
+        fromName: client.userName,
+        text: message.text,
       });
-      for (const { userId: mentionedUserId } of mentions) {
-        if (mentionedUserId === client.userId) continue;
-        this.server.to(`user:${mentionedUserId}`).emit('mention', {
-          roomId,
-          messageId: message.id,
-          fromName: client.userName,
-          text: message.text,
-        });
-      }
-
-      return { success: true, message };
-    } catch (e: unknown) {
-      throw new WsException(e instanceof Error ? e.message : 'Unknown error');
     }
+
+    return { success: true, message };
   }
 
   @SubscribeMessage('edit_message')
@@ -295,22 +294,18 @@ export class ChatGateway
     if (!(await this.checkRateLimit(client.userId, 'edit', 60))) {
       throw new WsException('Rate limit exceeded — slow down');
     }
-    try {
-      const dto: EditMessageDto = { text: data.text };
-      const updated = await this.messagesService.editMessage(
-        data.messageId,
-        client.userId,
-        dto,
-      );
-      this.server.to(updated.roomId).emit('message_edited', {
-        messageId: updated.id,
-        text: updated.text,
-        editedAt: updated.editedAt,
-      });
-      return { success: true };
-    } catch (e: unknown) {
-      throw new WsException(e instanceof Error ? e.message : 'Unknown error');
-    }
+    const dto: EditMessageDto = { text: data.text };
+    const updated = await this.messagesService.editMessage(
+      data.messageId,
+      client.userId,
+      dto,
+    );
+    this.server.to(updated.roomId).emit('message_edited', {
+      messageId: updated.id,
+      text: updated.text,
+      editedAt: updated.editedAt,
+    });
+    return { success: true };
   }
 
   @SubscribeMessage('delete_message')
@@ -318,18 +313,14 @@ export class ChatGateway
     @ConnectedSocket() client: AuthSocket,
     @MessageBody() data: MessageEventDto,
   ) {
-    try {
-      const deleted = await this.messagesService.deleteMessage(
-        data.messageId,
-        client.userId,
-      );
-      this.server.to(deleted.roomId).emit('message_deleted', {
-        messageId: deleted.id,
-      });
-      return { success: true };
-    } catch (e: unknown) {
-      throw new WsException(e instanceof Error ? e.message : 'Unknown error');
-    }
+    const deleted = await this.messagesService.deleteMessage(
+      data.messageId,
+      client.userId,
+    );
+    this.server.to(deleted.roomId).emit('message_deleted', {
+      messageId: deleted.id,
+    });
+    return { success: true };
   }
 
   @SubscribeMessage('toggle_reaction')
@@ -340,21 +331,17 @@ export class ChatGateway
     if (!(await this.checkRateLimit(client.userId, 'reaction', 60))) {
       throw new WsException('Rate limit exceeded — slow down');
     }
-    try {
-      const result = await this.messagesService.toggleReaction(
-        data.messageId,
-        client.userId,
-        data.emoji,
-      );
-      // Broadcast updated reactions to everyone in the room
-      this.server.to(result.roomId).emit('reaction_updated', {
-        messageId: result.messageId,
-        reactions: result.reactions,
-      });
-      return { success: true };
-    } catch (e: unknown) {
-      throw new WsException(e instanceof Error ? e.message : 'Unknown error');
-    }
+    const result = await this.messagesService.toggleReaction(
+      data.messageId,
+      client.userId,
+      data.emoji,
+    );
+    // Broadcast updated reactions to everyone in the room
+    this.server.to(result.roomId).emit('reaction_updated', {
+      messageId: result.messageId,
+      reactions: result.reactions,
+    });
+    return { success: true };
   }
 
   @SubscribeMessage('mark_read')

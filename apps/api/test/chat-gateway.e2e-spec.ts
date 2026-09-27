@@ -381,6 +381,23 @@ describe('Chat gateway authorization (e2e)', () => {
     expect(mockPrisma.message.create.mock.calls.length).toBe(created);
   });
 
+  it('hides internal errors behind a generic code instead of echoing them', async () => {
+    mockPrisma.message.create.mockImplementationOnce(async () => {
+      throw new Error('connect ECONNREFUSED db-internal:5432 (/srv/app/secret.ts)');
+    });
+    const errPromise = onceWithin<{ code?: string; message: string }>(
+      sockA,
+      'exception',
+      2000,
+    );
+    sockA.emit('send_message', { roomId: 'room-R1', text: 'trigger' });
+    const err = await errPromise;
+    expect(err).not.toBeNull();
+    expect(err!.code).toBe('INTERNAL_ERROR');
+    expect(err!.message).toBe('Internal server error');
+    expect(JSON.stringify(err)).not.toMatch(/db-internal|secret/);
+  });
+
   it('rejects mark_read from a non-member with WsException "Not a member of this room"', async () => {
     // Need a real message in R1 first — A sends one over the socket.
     const ack = await emitWithAck<{ success: boolean; message: { id: string } }>(
