@@ -1,5 +1,3 @@
-import { disconnectSocket } from './socket-control';
-
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 const ACCESS_TOKEN_KEY = 'chat_access_token';
 const REFRESH_TOKEN_KEY = 'chat_refresh_token';
@@ -40,12 +38,12 @@ export function getRefreshToken(): string | null {
 }
 
 export function setTokens(accessToken: string, refreshToken: string) {
-  const hadOldToken = !!localStorage.getItem(ACCESS_TOKEN_KEY);
   localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-  // If we're replacing an existing token (refresh case, not initial login),
-  // kick the socket so the next mount picks up the new token.
-  if (hadOldToken) disconnectSocket();
+  // No socket kick on refresh: the socket reads the token on every handshake
+  // (see useSocket), and the server only checks it at connect time, so the
+  // live connection stays valid. Disconnecting here used to kill real-time
+  // for good because nothing recreated the socket afterwards.
 }
 
 export function clearTokens() {

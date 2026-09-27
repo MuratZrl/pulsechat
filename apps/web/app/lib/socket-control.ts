@@ -1,8 +1,8 @@
 import type { Socket } from "socket.io-client";
 
-// Standalone module so api-client (which doesn't otherwise know about the
-// socket) can call disconnectSocket without importing from useSocket — that
-// would close an api-client → useSocket → api-client import cycle.
+// Holds the tab's single shared socket (created in useSocket). Kept as a
+// standalone module so non-hook code can reach the instance without
+// importing the hook module.
 
 let socketInstance: Socket | null = null;
 
