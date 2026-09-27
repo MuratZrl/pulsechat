@@ -58,8 +58,9 @@ model Room {
   id          String       @id @default(cuid())
   name        String
   type        RoomType     @default(CHANNEL)
-  createdById String
-  createdBy   User         @relation("RoomCreator", fields: [createdById], references: [id])
+  // Nullable so deleting the creator's account keeps the room (SET NULL).
+  createdById String?
+  createdBy   User?        @relation("RoomCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime     @default(now())
   members     RoomMember[]
   messages    Message[]
@@ -95,7 +96,8 @@ model RoomMember {
 model Message {
   id         String            @id @default(cuid())
   roomId     String
-  senderId   String
+  // Nullable so a deleted account's tombstoned messages survive (SET NULL).
+  senderId   String?
   text       String            @default("")
   createdAt  DateTime          @default(now())
   editedAt   DateTime?
@@ -104,7 +106,7 @@ model Message {
   attachment Json?
   forwarded  Json?
   room       Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  sender     User              @relation(fields: [senderId], references: [id])
+  sender     User?             @relation(fields: [senderId], references: [id], onDelete: SetNull)
   replyTo    Message?          @relation("MessageReplies", fields: [replyToId], references: [id])
   replies    Message[]         @relation("MessageReplies")
   reactions  MessageReaction[]

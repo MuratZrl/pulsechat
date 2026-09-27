@@ -121,12 +121,13 @@ export class PinsStarsService {
         message: {
           id: s.message.id,
           text: s.message.text,
-          senderName: s.message.sender.name,
+          // sender is null once its author deleted their account.
+          senderName: s.message.sender?.name ?? 'Deleted user',
           // Flat avatar fields mirror the message payload shape elsewhere.
           // Frontend StarredMessagesPanel uses them to render the author's
           // avatar next to the senderName — was text-only before.
-          senderAvatarUrl: s.message.sender.avatarUrl,
-          senderAvatarPreset: s.message.sender.avatarPreset,
+          senderAvatarUrl: s.message.sender?.avatarUrl ?? null,
+          senderAvatarPreset: s.message.sender?.avatarPreset ?? null,
         },
       }));
   }

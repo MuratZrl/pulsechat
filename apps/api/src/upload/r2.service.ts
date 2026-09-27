@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} from '@aws-sdk/client-s3';
 import { extname } from 'path';
 
 @Injectable()
@@ -37,5 +41,22 @@ export class R2Service {
     );
 
     return `${this.publicUrl}/${key}`;
+  }
+
+  /** Object key for a URL minted by upload(), or null for any other URL. */
+  keyFromPublicUrl(url: string): string | null {
+    if (!this.publicUrl) return null;
+    const prefix = `${this.publicUrl}/`;
+    return url.startsWith(prefix) ? url.slice(prefix.length) : null;
+  }
+
+  async deleteObjects(keys: string[]): Promise<void> {
+    // One DeleteObject per key: a handful of objects per account, and it
+    // avoids the checksum requirements of the multi-object delete call.
+    await Promise.all(
+      keys.map((Key) =>
+        this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key })),
+      ),
+    );
   }
 }

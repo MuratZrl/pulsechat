@@ -25,6 +25,10 @@ const GIPHY_URL_PATTERN =
 const ATTACHMENT_RATE_LIMIT = 10;
 const ATTACHMENT_RATE_WINDOW_SECONDS = 60;
 
+// Shown for messages whose author deleted their account (senderId is SET
+// NULL on user deletion, the tombstone row itself is kept).
+const DELETED_USER_NAME = 'Deleted user';
+
 @Injectable()
 export class MessagesService {
   constructor(
@@ -47,7 +51,7 @@ export class MessagesService {
   private formatMessage(msg: {
     id: string;
     roomId: string;
-    senderId: string;
+    senderId: string | null;
     text: string;
     createdAt: Date;
     editedAt: Date | null;
@@ -60,7 +64,7 @@ export class MessagesService {
       name: string;
       avatarUrl: string | null;
       avatarPreset: string | null;
-    };
+    } | null;
     reactions?: { emoji: string; userId: string }[];
     mentions?: { userId: string; user: { name: string } }[];
     replyTo?: {
@@ -73,21 +77,21 @@ export class MessagesService {
         name: string;
         avatarUrl: string | null;
         avatarPreset: string | null;
-      };
+      } | null;
     } | null;
   }) {
     return {
       id: msg.id,
       roomId: msg.roomId,
       senderId: msg.senderId,
-      senderName: msg.sender.name,
+      senderName: msg.sender?.name ?? DELETED_USER_NAME,
       // Sender avatar fields are flat alongside senderId/senderName so the
       // wire format stays additive — frontends that don't yet read them just
       // ignore extra keys, and the existing message-bubble path keeps working
       // unchanged. Tombstones ship the avatar too: a deleted message still
       // renders the author's gutter row, just with empty body text.
-      senderAvatarUrl: msg.sender.avatarUrl,
-      senderAvatarPreset: msg.sender.avatarPreset,
+      senderAvatarUrl: msg.sender?.avatarUrl ?? null,
+      senderAvatarPreset: msg.sender?.avatarPreset ?? null,
       text: msg.isDeleted ? '' : msg.text,
       createdAt: msg.createdAt.toISOString(),
       editedAt: msg.editedAt?.toISOString(),
@@ -111,9 +115,9 @@ export class MessagesService {
                   userId: m.userId,
                   userName: m.user.name,
                 })) ?? []),
-            senderName: msg.replyTo.sender.name,
-            senderAvatarUrl: msg.replyTo.sender.avatarUrl,
-            senderAvatarPreset: msg.replyTo.sender.avatarPreset,
+            senderName: msg.replyTo.sender?.name ?? DELETED_USER_NAME,
+            senderAvatarUrl: msg.replyTo.sender?.avatarUrl ?? null,
+            senderAvatarPreset: msg.replyTo.sender?.avatarPreset ?? null,
           }
         : undefined,
       attachment: msg.attachment ?? undefined,

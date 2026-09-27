@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { EmailService } from '../email/email.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { R2Service } from '../upload/r2.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -36,6 +37,7 @@ export class AuthService {
     private redis: RedisService,
     private email: EmailService,
     private realtime: RealtimeService,
+    private r2: R2Service,
   ) {}
 
   // ── Register ────────────────────────────────────────────────────────────────
@@ -290,21 +292,79 @@ export class AuthService {
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) throw new BadRequestException('Incorrect password');
 
-    // Soft-delete messages (preserve chat history for other users)
-    await this.prisma.message.updateMany({
-      where: { senderId: userId },
-      data: { isDeleted: true, text: '' },
-    });
+    // Resolve the account's uploads before its messages are blanked below.
+    const uploadKeys = await this.findOwnedUploadKeys(userId, user.avatarUrl);
 
-    // Cascade on User would purge refresh tokens too, but explicit is clearer
-    // and survives a future change to the FK rule.
-    await this.revokeAllRefreshTokens(userId);
-
-    // Delete user (cascades: room members, reactions, mentions, pins, stars, read receipts, invites)
-    await this.prisma.user.delete({ where: { id: userId } });
+    // One transaction, so a failure can't leave a half-deleted account (the
+    // old sequence blanked every message, then hit a FK error on delete).
+    // Messages are tombstoned rather than removed so other members keep the
+    // thread; Message.senderId and Room.createdById are ON DELETE SET NULL,
+    // so tombstones and rooms this user created outlive the account.
+    await this.prisma.$transaction([
+      this.prisma.message.updateMany({
+        where: { senderId: userId },
+        data: { isDeleted: true, text: '', attachment: Prisma.DbNull },
+      }),
+      // Cascade on User would purge refresh tokens too, but explicit is
+      // clearer and survives a future change to the FK rule.
+      this.prisma.refreshToken.deleteMany({ where: { userId } }),
+      // Cascades: room members, reactions, mentions, pins, stars, read receipts, invites
+      this.prisma.user.delete({ where: { id: userId } }),
+    ]);
     this.realtime.disconnectUser(userId);
 
+    // Storage cleanup runs after the commit and is best effort: the account
+    // is already gone, so a storage error is logged, not returned.
+    try {
+      await this.r2.deleteObjects(uploadKeys);
+    } catch (err) {
+      this.logger.error(`Failed to delete uploads of deleted user ${userId}`, err);
+    }
+
     return { message: 'Account deleted successfully' };
+  }
+
+  /**
+   * R2 keys of files this user uploaded: their avatar and the attachments on
+   * their messages. Uploads aren't recorded per user, so ownership is
+   * inferred from references — an object another user also references (a
+   * forwarded copy, or the same avatar URL) is left in place.
+   */
+  private async findOwnedUploadKeys(
+    userId: string,
+    avatarUrl: string | null,
+  ): Promise<string[]> {
+    const messages = await this.prisma.message.findMany({
+      where: { senderId: userId, attachment: { not: Prisma.DbNull } },
+      select: { attachment: true },
+    });
+    const urls = new Set<string>();
+    for (const { attachment } of messages) {
+      const url = (attachment as { url?: unknown } | null)?.url;
+      if (typeof url === 'string') urls.add(url);
+    }
+    if (avatarUrl) urls.add(avatarUrl);
+
+    const keys: string[] = [];
+    for (const url of urls) {
+      const key = this.r2.keyFromPublicUrl(url);
+      if (!key) continue; // GIPHY or anything our upload endpoint didn't mint
+      const [otherMessage, otherAvatar] = await Promise.all([
+        this.prisma.message.findFirst({
+          where: {
+            senderId: { not: userId },
+            attachment: { path: ['url'], equals: url },
+          },
+          select: { id: true },
+        }),
+        this.prisma.user.findFirst({
+          where: { id: { not: userId }, avatarUrl: url },
+          select: { id: true },
+        }),
+      ]);
+      if (!otherMessage && !otherAvatar) keys.push(key);
+    }
+    return keys;
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

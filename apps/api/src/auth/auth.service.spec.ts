@@ -16,6 +16,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { EmailService } from '../email/email.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { R2Service } from '../upload/r2.service';
 
 jest.mock('bcrypt');
 jest.mock('crypto', () => {
@@ -53,6 +54,7 @@ describe('AuthService', () => {
   const mockPrisma = {
     user: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
@@ -65,6 +67,8 @@ describe('AuthService', () => {
     },
     message: {
       updateMany: jest.fn(),
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
     },
     refreshToken: {
       create: jest.fn(),
@@ -119,6 +123,14 @@ describe('AuthService', () => {
     disconnectUser: jest.fn(),
   };
 
+  const R2_PREFIX = 'https://pub-test.r2.dev/';
+  const mockR2 = {
+    keyFromPublicUrl: jest.fn((url: string) =>
+      url.startsWith(R2_PREFIX) ? url.slice(R2_PREFIX.length) : null,
+    ),
+    deleteObjects: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -148,6 +160,7 @@ describe('AuthService', () => {
         { provide: RedisService, useValue: mockRedis },
         { provide: EmailService, useValue: mockEmail },
         { provide: RealtimeService, useValue: mockRealtime },
+        { provide: R2Service, useValue: mockR2 },
       ],
     }).compile();
 
@@ -849,7 +862,14 @@ describe('AuthService', () => {
   // ── Delete Account ────────────────────────────────────────────────────────────
 
   describe('deleteAccount', () => {
-    it('should delete the account and revoke refresh tokens', async () => {
+    beforeEach(() => {
+      mockPrisma.message.findMany.mockResolvedValue([]);
+      mockPrisma.message.findFirst.mockResolvedValue(null);
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockR2.deleteObjects.mockResolvedValue(undefined);
+    });
+
+    it('should delete the account and revoke refresh tokens in one transaction', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       mockPrisma.message.updateMany.mockResolvedValue({ count: 5 });
@@ -862,9 +882,10 @@ describe('AuthService', () => {
         'Password1!',
         mockUser.passwordHash,
       );
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       expect(mockPrisma.message.updateMany).toHaveBeenCalledWith({
         where: { senderId: 'user-1' },
-        data: { isDeleted: true, text: '' },
+        data: { isDeleted: true, text: '', attachment: Prisma.DbNull },
       });
       expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
@@ -873,6 +894,44 @@ describe('AuthService', () => {
         where: { id: 'user-1' },
       });
       expect(mockRealtime.disconnectUser).toHaveBeenCalledWith('user-1');
+    });
+
+    it("should delete only the user's own uploads from R2", async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        avatarUrl: `${R2_PREFIX}avatar.png`,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockPrisma.message.findMany.mockResolvedValue([
+        { attachment: { url: `${R2_PREFIX}own.png` } },
+        { attachment: { url: `${R2_PREFIX}shared.png` } },
+        { attachment: { url: 'https://media1.giphy.com/media/abc/giphy.gif' } },
+      ]);
+      // Another user's message still references shared.png (a forward).
+      mockPrisma.message.findFirst.mockImplementation(
+        async ({ where }: { where: { attachment: { equals: string } } }) =>
+          where.attachment.equals === `${R2_PREFIX}shared.png`
+            ? { id: 'other-msg' }
+            : null,
+      );
+
+      await service.deleteAccount('user-1', 'Password1!');
+
+      expect(mockR2.deleteObjects).toHaveBeenCalledWith([
+        'own.png',
+        'avatar.png',
+      ]);
+    });
+
+    it('should still succeed when R2 cleanup fails after the commit', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockR2.deleteObjects.mockRejectedValue(new Error('R2 down'));
+
+      await expect(
+        service.deleteAccount('user-1', 'Password1!'),
+      ).resolves.toEqual({ message: 'Account deleted successfully' });
+      expect(mockPrisma.user.delete).toHaveBeenCalled();
     });
 
     it('should throw BadRequestException for wrong password', async () => {
