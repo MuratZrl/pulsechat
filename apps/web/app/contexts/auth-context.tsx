@@ -14,7 +14,7 @@ import {
   clearTokens,
   getAccessToken,
 } from "../lib/api-client";
-import { disconnectSocket } from "../hooks/useSocket";
+import { disconnectSocket, getSocket } from "../hooks/useSocket";
 
 interface AuthContextType {
   user: User | null;
@@ -141,6 +141,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         currentPassword,
         newPassword,
       });
+      // The server drops every socket of this user on a password change to
+      // cut off other sessions; this tab's access token is still valid, so
+      // reconnect it instead of leaving real-time dead here too. The kick can
+      // land before or after this response, so handle both orders.
+      const socket = getSocket();
+      if (socket?.connected) socket.once("disconnect", () => socket.connect());
+      else socket?.connect();
       return { success: true };
     } catch (e: unknown) {
       return {

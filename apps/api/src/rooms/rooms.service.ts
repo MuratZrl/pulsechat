@@ -173,6 +173,9 @@ export class RoomsService {
       throw new ForbiddenException('Direct messages cannot be left');
     }
     await this.prisma.roomMember.deleteMany({ where: { userId, roomId } });
+    // Membership is gone; drop the user's live sockets from the room too so
+    // they stop receiving its messages without waiting for a reconnect.
+    this.realtime.leaveRoom(userId, roomId);
     return { success: true };
   }
 

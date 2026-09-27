@@ -7,10 +7,10 @@ import { RealtimeService } from '../realtime/realtime.service';
 describe('RoomsService', () => {
   let service: RoomsService;
   let prisma: Record<string, Record<string, jest.Mock>>;
-  let realtime: { joinRoom: jest.Mock };
+  let realtime: { joinRoom: jest.Mock; leaveRoom: jest.Mock };
 
   beforeEach(async () => {
-    realtime = { joinRoom: jest.fn() };
+    realtime = { joinRoom: jest.fn(), leaveRoom: jest.fn() };
     prisma = {
       room: {
         create: jest.fn(),
@@ -194,6 +194,8 @@ describe('RoomsService', () => {
       expect(prisma.roomMember.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'u1', roomId: 'r1' },
       });
+      // Live sockets must stop receiving the room's events immediately.
+      expect(realtime.leaveRoom).toHaveBeenCalledWith('u1', 'r1');
     });
 
     it('should throw NotFoundException when room does not exist', async () => {

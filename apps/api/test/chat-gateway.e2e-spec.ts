@@ -78,6 +78,18 @@ describe('Chat gateway authorization (e2e)', () => {
           where: { userId_roomId: { userId: string; roomId: string } };
         }) => findMember(where.userId_roomId.userId, where.userId_roomId.roomId),
       ),
+      deleteMany: jest.fn(
+        async ({ where }: { where: { userId: string; roomId: string } }) => {
+          const before = roomMembers.length;
+          for (let i = roomMembers.length - 1; i >= 0; i--) {
+            const m = roomMembers[i];
+            if (m.userId === where.userId && m.roomId === where.roomId) {
+              roomMembers.splice(i, 1);
+            }
+          }
+          return { count: before - roomMembers.length };
+        },
+      ),
       findMany: jest.fn(
         async ({
           where,
@@ -165,6 +177,14 @@ describe('Chat gateway authorization (e2e)', () => {
     readReceipt: {
       upsert: jest.fn(async () => ({})),
     },
+    room: {
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) =>
+        where.id === 'room-R2' ? { type: 'CHANNEL' } : null,
+      ),
+    },
+    refreshToken: {
+      deleteMany: jest.fn(async () => ({ count: 0 })),
+    },
   };
 
   const mockRedis = {
@@ -196,6 +216,9 @@ describe('Chat gateway authorization (e2e)', () => {
     users.set('user-A', { id: 'user-A', name: 'Alice', email: 'a@example.com' });
     users.set('user-B', { id: 'user-B', name: 'Bob', email: 'b@example.com' });
     roomMembers.push({ userId: 'user-A', roomId: 'room-R1', role: 'member' });
+    // Both are members of CHANNEL room R2 (used by the leave/logout tests).
+    roomMembers.push({ userId: 'user-A', roomId: 'room-R2', role: 'member' });
+    roomMembers.push({ userId: 'user-B', roomId: 'room-R2', role: 'member' });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -406,5 +429,40 @@ describe('Chat gateway authorization (e2e)', () => {
     expect(err).not.toBeNull();
     expect(err!.message).toBe('Unauthorized');
     expect(err!.data?.code).toBe('TOKEN_EXPIRED');
+  });
+
+  it("stops delivering a room's messages to a socket once its user leaves over HTTP", async () => {
+    const before = onceWithin<{ text: string }>(sockB, 'new_message', 1000);
+    await emitWithAck(sockA, 'send_message', {
+      roomId: 'room-R2',
+      text: 'before leave',
+    });
+    expect((await before)?.text).toBe('before leave');
+
+    const res = await fetch(`${url}/api/rooms/room-R2/leave`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${tokenB}` },
+    });
+    expect(res.status).toBe(200);
+
+    const after = onceWithin(sockB, 'new_message', 500);
+    await emitWithAck(sockA, 'send_message', {
+      roomId: 'room-R2',
+      text: 'after leave',
+    });
+    expect(await after).toBeNull();
+  });
+
+  // Keep last: it closes sockB.
+  it("disconnects a user's sockets when they log out", async () => {
+    const reason = new Promise<string>((resolve) =>
+      sockB.once('disconnect', resolve),
+    );
+    const res = await fetch(`${url}/api/auth/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenB}` },
+    });
+    expect(res.status).toBe(201);
+    expect(await reason).toBe('io server disconnect');
   });
 });

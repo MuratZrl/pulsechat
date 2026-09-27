@@ -21,4 +21,18 @@ export class RealtimeService {
   joinRoom(userId: string, roomId: string): void {
     this.server?.in(`user:${userId}`).socketsJoin(roomId);
   }
+
+  /** Unsubscribe every live socket of `userId` from `roomId`. */
+  leaveRoom(userId: string, roomId: string): void {
+    this.server?.in(`user:${userId}`).socketsLeave(roomId);
+  }
+
+  /**
+   * Close every live socket of `userId`. Used when their sessions are
+   * revoked (logout, password change/reset, account deletion) so a socket
+   * authenticated earlier doesn't keep reading and posting.
+   */
+  disconnectUser(userId: string): void {
+    this.server?.in(`user:${userId}`).disconnectSockets(true);
+  }
 }

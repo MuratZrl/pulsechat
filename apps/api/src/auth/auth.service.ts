@@ -13,6 +13,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { EmailService } from '../email/email.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -34,6 +35,7 @@ export class AuthService {
     private config: ConfigService,
     private redis: RedisService,
     private email: EmailService,
+    private realtime: RealtimeService,
   ) {}
 
   // ── Register ────────────────────────────────────────────────────────────────
@@ -175,6 +177,7 @@ export class AuthService {
 
   async logout(userId: string) {
     await this.revokeAllRefreshTokens(userId);
+    this.realtime.disconnectUser(userId);
     return { message: 'Logged out' };
   }
 
@@ -207,8 +210,10 @@ export class AuthService {
     });
 
     // Invalidate every existing session — a password change must log out
-    // any other device that still holds an old refresh token.
+    // any other device that still holds an old refresh token, and drop the
+    // sockets those sessions opened.
     await this.revokeAllRefreshTokens(userId);
+    this.realtime.disconnectUser(userId);
 
     return { message: 'Password changed successfully' };
   }
@@ -245,6 +250,7 @@ export class AuthService {
 
     await this.redis.del(`reset:${dto.token}`);
     await this.revokeAllRefreshTokens(userId);
+    this.realtime.disconnectUser(userId);
 
     return { message: 'Password has been reset successfully' };
   }
@@ -296,6 +302,7 @@ export class AuthService {
 
     // Delete user (cascades: room members, reactions, mentions, pins, stars, read receipts, invites)
     await this.prisma.user.delete({ where: { id: userId } });
+    this.realtime.disconnectUser(userId);
 
     return { message: 'Account deleted successfully' };
   }

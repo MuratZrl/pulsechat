@@ -15,6 +15,7 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { EmailService } from '../email/email.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 jest.mock('bcrypt');
 jest.mock('crypto', () => {
@@ -114,6 +115,10 @@ describe('AuthService', () => {
     sendVerificationEmail: jest.fn(),
   };
 
+  const mockRealtime = {
+    disconnectUser: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -142,6 +147,7 @@ describe('AuthService', () => {
         { provide: ConfigService, useValue: mockConfig },
         { provide: RedisService, useValue: mockRedis },
         { provide: EmailService, useValue: mockEmail },
+        { provide: RealtimeService, useValue: mockRealtime },
       ],
     }).compile();
 
@@ -604,6 +610,7 @@ describe('AuthService', () => {
       expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
       });
+      expect(mockRealtime.disconnectUser).toHaveBeenCalledWith('user-1');
     });
   });
 
@@ -671,6 +678,7 @@ describe('AuthService', () => {
       expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
       });
+      expect(mockRealtime.disconnectUser).toHaveBeenCalledWith('user-1');
     });
 
     it('should throw BadRequestException for wrong current password', async () => {
@@ -752,6 +760,7 @@ describe('AuthService', () => {
       expect(mockPrisma.refreshToken.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
       });
+      expect(mockRealtime.disconnectUser).toHaveBeenCalledWith('user-1');
     });
 
     it('should throw BadRequestException for invalid or expired token', async () => {
@@ -863,6 +872,7 @@ describe('AuthService', () => {
       expect(mockPrisma.user.delete).toHaveBeenCalledWith({
         where: { id: 'user-1' },
       });
+      expect(mockRealtime.disconnectUser).toHaveBeenCalledWith('user-1');
     });
 
     it('should throw BadRequestException for wrong password', async () => {
