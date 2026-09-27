@@ -229,12 +229,12 @@ export default function ChatRoomPage({
   useEffect(() => {
     if (!socket || !user) return;
 
-    // No explicit join_room emit — the gateway's connection handler
-    // auto-joins every room the user is a member of, so this socket is
-    // already in `roomId` by the time we arrive here. The previous emit
-    // raced the connection-time auth (client.userId set after a Prisma
-    // lookup) and produced a swallowed PrismaClientValidationError on
-    // every page mount.
+    // The gateway auto-joins member rooms only at connect time, so a room
+    // created, joined or DM'd after the socket connected would never get
+    // live events. join_room is idempotent and membership-checked server
+    // side (auth now runs in the connection middleware, so the old race with
+    // client.userId no longer applies).
+    socket.emit("join_room", { roomId });
 
     const onNewMessage = (msg: Message) => {
       if (msg.roomId !== roomId) return;

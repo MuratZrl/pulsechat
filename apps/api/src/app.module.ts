@@ -13,6 +13,7 @@ import { ChatModule } from './chat/chat.module';
 import { UploadModule } from './upload/upload.module';
 import { PinsStarsModule } from './pins-stars/pins-stars.module';
 import { HealthModule } from './health/health.module';
+import { RealtimeModule } from './realtime/realtime.module';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
 
 @Module({
@@ -21,6 +22,7 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
     PrismaModule,
     RedisModule,
+    RealtimeModule,
     EmailModule,
     AuthModule,
     UsersModule,

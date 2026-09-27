@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 
 // Channels joinable through POST /rooms/:id/join without an invite. Every
@@ -8,7 +9,10 @@ const PUBLIC_DEFAULTS = new Set(['General', 'Random']);
 
 @Injectable()
 export class RoomsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private realtime: RealtimeService,
+  ) {}
 
   async getRooms(userId: string) {
     const memberships = await this.prisma.roomMember.findMany({
@@ -77,6 +81,9 @@ export class RoomsService {
         members: { create: { userId, role: 'admin' } },
       },
     });
+    // Sockets only auto-join rooms at connect time; subscribe the creator's
+    // open sockets now so their first message shows up without a reload.
+    this.realtime.joinRoom(userId, room.id);
     return {
       id: room.id,
       name: room.name,
@@ -149,6 +156,7 @@ export class RoomsService {
       create: { userId, roomId, role: 'member' },
       update: {},
     });
+    this.realtime.joinRoom(userId, roomId);
     return { success: true };
   }
 
@@ -225,6 +233,11 @@ export class RoomsService {
         },
       },
     });
+
+    // Both participants may already be connected; subscribe them so the
+    // first DM message reaches each side live.
+    this.realtime.joinRoom(currentUserId, room.id);
+    this.realtime.joinRoom(targetUserId, room.id);
 
     return { id: room.id, name: target.name, type: 'DM', isNew: true };
   }
@@ -305,6 +318,7 @@ export class RoomsService {
       create: { userId, roomId: invite.roomId, role: 'member' },
       update: {},
     });
+    this.realtime.joinRoom(userId, invite.roomId);
 
     return { roomId: invite.roomId, roomName: invite.room.name, type: invite.room.type };
   }

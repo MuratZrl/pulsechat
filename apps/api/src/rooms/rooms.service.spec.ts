@@ -2,12 +2,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { RoomsService } from './rooms.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 describe('RoomsService', () => {
   let service: RoomsService;
   let prisma: Record<string, Record<string, jest.Mock>>;
+  let realtime: { joinRoom: jest.Mock };
 
   beforeEach(async () => {
+    realtime = { joinRoom: jest.fn() };
     prisma = {
       room: {
         create: jest.fn(),
@@ -37,6 +40,7 @@ describe('RoomsService', () => {
       providers: [
         RoomsService,
         { provide: PrismaService, useValue: prisma },
+        { provide: RealtimeService, useValue: realtime },
       ],
     }).compile();
 
@@ -74,6 +78,8 @@ describe('RoomsService', () => {
           members: { create: { userId: 'u1', role: 'admin' } },
         },
       });
+      // The creator's already-open sockets must be subscribed to the new room.
+      expect(realtime.joinRoom).toHaveBeenCalledWith('u1', 'r1');
     });
   });
 
@@ -143,6 +149,7 @@ describe('RoomsService', () => {
         create: { userId: 'u1', roomId: 'r1', role: 'member' },
         update: {},
       });
+      expect(realtime.joinRoom).toHaveBeenCalledWith('u1', 'r1');
     });
 
     it('should throw NotFoundException when room does not exist', async () => {
@@ -238,6 +245,8 @@ describe('RoomsService', () => {
 
       expect(result).toEqual({ id: 'dm1', name: 'Bob', type: 'DM', isNew: true });
       expect(prisma.room.create).toHaveBeenCalled();
+      expect(realtime.joinRoom).toHaveBeenCalledWith('u1', 'dm1');
+      expect(realtime.joinRoom).toHaveBeenCalledWith('u2', 'dm1');
     });
 
     it('should throw ForbiddenException when trying to DM yourself', async () => {
@@ -306,6 +315,7 @@ describe('RoomsService', () => {
       const result = await service.joinByInvite('abc123', 'u1');
 
       expect(result).toEqual({ roomId: 'r1', roomName: 'General', type: 'GROUP' });
+      expect(realtime.joinRoom).toHaveBeenCalledWith('u1', 'r1');
     });
 
     it('should throw NotFoundException for invalid invite code', async () => {

@@ -15,6 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { MessagesService } from '../messages/messages.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateMessageDto } from '../messages/dto/create-message.dto';
 import { EditMessageDto } from '../messages/dto/edit-message.dto';
 import { Injectable, Logger } from '@nestjs/common';
@@ -48,6 +49,7 @@ export class ChatGateway
     private messagesService: MessagesService,
     private prisma: PrismaService,
     private redis: RedisService,
+    private realtime: RealtimeService,
   ) {}
 
   /**
@@ -90,6 +92,10 @@ export class ChatGateway
    * perspective.
    */
   afterInit(server: Server): void {
+    // Hand the server to RealtimeService so HTTP-side flows (room create,
+    // invite join, DM) can subscribe a user's already-open sockets.
+    this.realtime.attachServer(server);
+
     server.use(async (socket: Socket, next: (err?: Error) => void) => {
       try {
         const token =
