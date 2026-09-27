@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ForbiddenException, ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './adapters/redis-io.adapter';
@@ -32,12 +32,11 @@ async function bootstrap() {
 
   // CORS — allow frontend
   //
-  // Accept the configured production origin AND any Vercel preview deploy.
-  // Vercel mints a new subdomain per branch (e.g. pulsechat-git-fix-foo-...
-  // .vercel.app), so a hardcoded list can't cover them. Locked to project
-  // subdomains via regex so unrelated *.vercel.app sites can't hit us.
+  // Only the one configured web origin (FRONTEND_URL), plus localhost when not
+  // running in production. The former pulsechat-*.vercel.app pattern matched
+  // any Vercel project with that name prefix, which anyone can create.
   const productionOrigin = process.env.FRONTEND_URL ?? 'http://localhost:3000';
-  const previewPattern = /^https:\/\/pulsechat-[a-z0-9-]+\.vercel\.app$/;
+  const allowLocalhost = process.env.NODE_ENV !== 'production';
   const localhostPattern = /^http:\/\/localhost:\d+$/;
 
   app.enableCors({
@@ -54,14 +53,15 @@ async function bootstrap() {
 
       if (
         origin === productionOrigin ||
-        previewPattern.test(origin) ||
-        localhostPattern.test(origin)
+        (allowLocalhost && localhostPattern.test(origin))
       ) {
         callback(null, true);
         return;
       }
 
-      callback(new Error(`Origin not allowed by CORS: ${origin}`));
+      // An HttpException, not a bare Error: Nest's error handler turns the
+      // latter into a 500.
+      callback(new ForbiddenException(`Origin not allowed by CORS: ${origin}`));
     },
     credentials: true,
   });
