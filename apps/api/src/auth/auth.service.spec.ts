@@ -112,6 +112,8 @@ describe('AuthService', () => {
     set: jest.fn(),
     get: jest.fn(),
     del: jest.fn(),
+    incr: jest.fn(),
+    expire: jest.fn(),
   };
 
   const mockEmail = {
@@ -150,6 +152,8 @@ describe('AuthService', () => {
     mockPrisma.refreshToken.findUnique.mockResolvedValue(null);
     mockPrisma.refreshToken.delete.mockResolvedValue({});
     mockPrisma.refreshToken.deleteMany.mockResolvedValue({ count: 0 });
+    // First hit in a fresh rate-limit window unless a test says otherwise.
+    mockRedis.incr.mockResolvedValue(1);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -841,6 +845,29 @@ describe('AuthService', () => {
       expect(mockEmail.sendVerificationEmail).toHaveBeenCalledWith(
         unverifiedUser.email,
         'mock-random-token',
+      );
+    });
+
+    it('should refuse a 4th resend within 10 minutes for the same account', async () => {
+      mockRedis.incr.mockResolvedValue(4);
+
+      await expect(service.resendVerification('user-1')).rejects.toMatchObject({
+        status: 429,
+      });
+      expect(mockRedis.incr).toHaveBeenCalledWith('rl:resend-verification:user-1');
+      expect(mockEmail.sendVerificationEmail).not.toHaveBeenCalled();
+    });
+
+    it('should start a 10-minute window on the first resend', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ ...mockUser, emailVerified: false });
+      mockRedis.set.mockResolvedValue('OK');
+      mockEmail.sendVerificationEmail.mockResolvedValue(undefined);
+
+      await service.resendVerification('user-1');
+
+      expect(mockRedis.expire).toHaveBeenCalledWith(
+        'rl:resend-verification:user-1',
+        600,
       );
     });
 

@@ -3,6 +3,8 @@ import {
   ConflictException,
   UnauthorizedException,
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -19,6 +21,12 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+
+// Each resend emails whatever address the account registered with — which
+// may not belong to the caller — so it gets its own per-account budget
+// instead of only the global per-IP throttle.
+const RESEND_VERIFICATION_LIMIT = 3;
+const RESEND_VERIFICATION_WINDOW_SECONDS = 600;
 
 @Injectable()
 export class AuthService {
@@ -274,6 +282,18 @@ export class AuthService {
   }
 
   async resendVerification(userId: string) {
+    const rateKey = `rl:resend-verification:${userId}`;
+    const count = await this.redis.incr(rateKey);
+    if (count === 1) {
+      await this.redis.expire(rateKey, RESEND_VERIFICATION_WINDOW_SECONDS);
+    }
+    if (count > RESEND_VERIFICATION_LIMIT) {
+      throw new HttpException(
+        'Too many verification emails requested — try again later',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();
     if (user.emailVerified) throw new BadRequestException('Email is already verified');

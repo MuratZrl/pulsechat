@@ -1,12 +1,19 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './adapters/redis-io.adapter';
 
 type CorsOriginCallback = (err: Error | null, allow?: boolean) => void;
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Railway's edge proxy terminates every request, so without this req.ip is
+  // the proxy's address and the IP-keyed throttler shares one bucket across
+  // all visitors. Trust exactly one hop: the client IP the edge appends to
+  // X-Forwarded-For, not client-supplied entries further left.
+  app.set('trust proxy', 1);
 
   // Wire the socket.io Redis adapter BEFORE app.listen so the gateway boots
   // with cross-replica pub/sub instead of the in-memory default.
