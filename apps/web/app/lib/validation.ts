@@ -5,7 +5,7 @@
 // rejects (or vice-versa) and users will see "Password must contain..."
 // 400s after their client-side check passed.
 const PASSWORD_MIN_LENGTH = 6;
-const PASSWORD_MAX_LENGTH = 128;
+const PASSWORD_MAX_BYTES = 72; // bcrypt's input limit, counted in UTF-8 bytes
 const PASSWORD_PATTERN = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/;
 const PASSWORD_RULE_MESSAGE =
   "Password must contain at least one uppercase letter, one number, and one special character";
@@ -32,8 +32,8 @@ export function getPasswordStrength(
 export function validatePassword(password: string): string | null {
   if (password.length < PASSWORD_MIN_LENGTH)
     return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
-  if (password.length > PASSWORD_MAX_LENGTH)
-    return `Password must be at most ${PASSWORD_MAX_LENGTH} characters`;
+  if (new TextEncoder().encode(password).length > PASSWORD_MAX_BYTES)
+    return `Password must be at most ${PASSWORD_MAX_BYTES} bytes`;
   if (!PASSWORD_PATTERN.test(password)) return PASSWORD_RULE_MESSAGE;
   return null;
 }

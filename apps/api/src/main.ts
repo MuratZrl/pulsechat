@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ForbiddenException, ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './adapters/redis-io.adapter';
 
@@ -15,16 +16,23 @@ async function bootstrap() {
   // X-Forwarded-For, not client-supplied entries further left.
   app.set('trust proxy', 1);
 
+  // Standard security headers; also drops X-Powered-By.
+  app.use(helmet());
+
   // Wire the socket.io Redis adapter BEFORE app.listen so the gateway boots
   // with cross-replica pub/sub instead of the in-memory default.
   const ioAdapter = new RedisIoAdapter(app);
   await ioAdapter.connectToRedis();
   app.useWebSocketAdapter(ioAdapter);
 
-  // Quit the dedicated pub/sub clients on shutdown. RedisService cleans up its
-  // own client via OnModuleDestroy; this hook covers the adapter's pair.
+  // Registering a SIGTERM listener removes Node's default exit, so shut down
+  // explicitly: close the app (HTTP server, sockets, OnModuleDestroy hooks),
+  // then the adapter's pub/sub pair, then exit.
   process.on('SIGTERM', () => {
-    void ioAdapter.disconnect();
+    void app
+      .close()
+      .finally(() => ioAdapter.disconnect())
+      .finally(() => process.exit(0));
   });
 
   // Global validation

@@ -145,3 +145,42 @@ describe('Email normalization (Bug 3)', () => {
     expect(instance.email).toBe(12345);
   });
 });
+
+describe('Password byte cap (bcrypt only hashes 72 bytes)', () => {
+  const register = (password: string) =>
+    validate(
+      plainToInstance(RegisterDto, {
+        name: 'Alice',
+        email: 'a@example.com',
+        password,
+      }),
+    );
+
+  it('accepts a password of exactly 72 bytes', async () => {
+    const errors = await register('Aa1!' + 'x'.repeat(68));
+    expect(findError(errors, 'password')).toBeUndefined();
+  });
+
+  it('rejects a new password longer than 72 bytes', async () => {
+    const errors = await register('Aa1!' + 'x'.repeat(69));
+    expect(findError(errors, 'password')?.constraints).toMatchObject({
+      isByteLength: expect.stringContaining('72 bytes'),
+    });
+  });
+
+  it('counts UTF-8 bytes, not characters', async () => {
+    // 39 characters but 74 bytes: each "é" is 2 bytes.
+    const errors = await register('Aa1!' + 'é'.repeat(35));
+    expect(findError(errors, 'password')).toBeDefined();
+  });
+
+  it('still lets pre-cap accounts log in with a longer password', async () => {
+    const errors = await validate(
+      plainToInstance(LoginDto, {
+        email: 'a@example.com',
+        password: 'Aa1!' + 'x'.repeat(96),
+      }),
+    );
+    expect(findError(errors, 'password')).toBeUndefined();
+  });
+});

@@ -8,10 +8,13 @@ export class EmailService {
   private transporter: nodemailer.Transporter;
 
   constructor(private config: ConfigService) {
+    // Env values are strings; comparing the raw value to 465 was always false,
+    // so implicit-TLS port 465 never got secure: true.
+    const port = Number(this.config.get('SMTP_PORT', 587));
     this.transporter = nodemailer.createTransport({
       host: this.config.get('SMTP_HOST', 'localhost'),
-      port: this.config.get<number>('SMTP_PORT', 587),
-      secure: this.config.get<number>('SMTP_PORT', 587) === 465,
+      port,
+      secure: port === 465,
       auth: {
         user: this.config.get('SMTP_USER'),
         pass: this.config.get('SMTP_PASS'),

@@ -81,6 +81,7 @@ describe('Messages validation (e2e)', () => {
       ),
     },
     message: {
+      findMany: jest.fn(async () => []),
       findUnique: jest.fn(
         async ({
           where,
@@ -255,6 +256,27 @@ describe('Messages validation (e2e)', () => {
     roomMembers.length = 0;
     messages.clear();
     if (app) await app.close();
+  });
+
+  // ── Query params ─────────────────────────────────────────────────────────
+
+  it.each([['limit=abc'], ['limit=0'], ['limit=101'], ['before=not-a-date']])(
+    'rejects invalid pagination params (%s) with 400, not a 500',
+    async (qs) => {
+      await request(app.getHttpServer())
+        .get(`/api/rooms/room-R1/messages?${qs}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+    },
+  );
+
+  it('accepts a valid limit and before cursor', async () => {
+    await request(app.getHttpServer())
+      .get(
+        `/api/rooms/room-R1/messages?limit=15&before=${encodeURIComponent(new Date().toISOString())}`,
+      )
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
   });
 
   // ── Text length ──────────────────────────────────────────────────────────

@@ -13,6 +13,10 @@ import {
 import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
+import {
+  GetMessagesQueryDto,
+  SearchMessagesQueryDto,
+} from './dto/message-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
@@ -34,19 +38,18 @@ export class MessagesController {
   searchMessages(
     @Request() req: { user: { id: string } },
     @Param('roomId') roomId: string,
-    @Query('q') q: string,
-    @Query('limit') limit?: string,
+    @Query() query: SearchMessagesQueryDto,
   ) {
     // Minimum 2 characters: a single-char query degrades to a full-table
     // LIKE '%x%' scan in Postgres, which is a cheap DoS vector for any
     // authenticated user. Two chars matches typical search UX too.
-    const trimmed = q?.trim() ?? '';
+    const trimmed = query.q?.trim() ?? '';
     if (trimmed.length < 2) return [];
     return this.messagesService.searchMessages(
       roomId,
       req.user.id,
       trimmed,
-      limit ? parseInt(limit) : 20,
+      query.limit ?? 20,
     );
   }
 
@@ -54,14 +57,13 @@ export class MessagesController {
   getMessages(
     @Request() req: { user: { id: string } },
     @Param('roomId') roomId: string,
-    @Query('limit') limit?: string,
-    @Query('before') before?: string,
+    @Query() query: GetMessagesQueryDto,
   ) {
     return this.messagesService.getMessages(
       roomId,
       req.user.id,
-      limit ? parseInt(limit) : 30,
-      before,
+      query.limit ?? 30,
+      query.before,
     );
   }
 
