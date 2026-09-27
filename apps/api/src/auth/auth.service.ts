@@ -28,6 +28,9 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 const RESEND_VERIFICATION_LIMIT = 3;
 const RESEND_VERIFICATION_WINDOW_SECONDS = 600;
 
+// How long a rotated refresh token stays usable (see refreshTokens).
+const REFRESH_REUSE_GRACE_MS = 10_000;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -149,10 +152,19 @@ export class AuthService {
       where: { tokenHash },
     });
 
+    const now = new Date();
+    // A token rotated moments ago is still accepted: two tabs share one
+    // refresh token and can refresh at the same time. Past the window, seeing
+    // it again means it was replayed.
+    const rotatedOutsideGrace =
+      stored?.rotatedAt != null &&
+      now.getTime() - stored.rotatedAt.getTime() > REFRESH_REUSE_GRACE_MS;
+
     if (
       !stored ||
       stored.userId !== payload.sub ||
-      stored.expiresAt <= new Date()
+      stored.expiresAt <= now ||
+      rotatedOutsideGrace
     ) {
       // Signature valid but no live row matches this user — revoked/replayed
       // token or a forgery. Treat as reuse: nuke every refresh token for the
@@ -170,16 +182,45 @@ export class AuthService {
     if (!user) throw new UnauthorizedException();
 
     const issued = await this.issueTokens(user.id, user.email);
-    await this.prisma.$transaction([
-      this.prisma.refreshToken.delete({ where: { id: stored.id } }),
-      this.prisma.refreshToken.create({
-        data: {
-          userId: user.id,
-          tokenHash: issued.refreshTokenHash,
-          expiresAt: issued.refreshExpiresAt,
-        },
-      }),
-    ]);
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Mark the presented token rotated instead of deleting it, so a
+        // concurrent refresh with the same token still finds it inside the
+        // grace window. The first rotation's timestamp is kept, so reuse
+        // doesn't extend the window.
+        const marked = await tx.refreshToken.updateMany({
+          where: { id: stored.id },
+          data: { rotatedAt: stored.rotatedAt ?? now },
+        });
+        // Row gone: revoked by a logout or password change that landed
+        // mid-refresh. Don't mint a token after the revocation.
+        if (marked.count === 0) {
+          throw new UnauthorizedException('Invalid refresh token');
+        }
+        // Rows rotated before the window only matter for replay detection,
+        // and a missing row is treated as reuse anyway.
+        await tx.refreshToken.deleteMany({
+          where: {
+            userId: user.id,
+            rotatedAt: { lt: new Date(now.getTime() - REFRESH_REUSE_GRACE_MS) },
+          },
+        });
+        await tx.refreshToken.create({
+          data: {
+            userId: user.id,
+            tokenHash: issued.refreshTokenHash,
+            expiresAt: issued.refreshExpiresAt,
+          },
+        });
+      });
+    } catch (err) {
+      // A write collision with a concurrent refresh or revocation is a
+      // failed refresh (401), not a server error.
+      if (err instanceof Prisma.PrismaClientKnownRequestError) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+      throw err;
+    }
 
     return { accessToken: issued.accessToken, refreshToken: issued.refreshToken };
   }

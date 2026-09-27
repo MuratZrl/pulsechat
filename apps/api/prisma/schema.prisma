@@ -49,6 +49,10 @@ model RefreshToken {
   tokenHash String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
+  // Set when the token is exchanged for a new pair. The row stays usable for
+  // a short grace window so concurrent refreshes (two tabs) aren't treated as
+  // reuse; after that, presenting it again revokes the user's sessions.
+  rotatedAt DateTime?
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])

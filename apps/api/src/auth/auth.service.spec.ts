@@ -78,6 +78,7 @@ describe('AuthService', () => {
       findUnique: jest.fn(),
       delete: jest.fn(),
       deleteMany: jest.fn(),
+      updateMany: jest.fn(),
     },
     mention: {},
     $transaction: jest.fn(async (ops: unknown) =>
@@ -405,10 +406,11 @@ describe('AuthService', () => {
       tokenHash: string;
       expiresAt: Date;
       createdAt: Date;
+      rotatedAt?: Date | null;
     };
 
     // Build an in-memory RefreshToken store that supports the queries the
-    // service uses (findUnique by tokenHash, delete, create, deleteMany).
+    // service uses (findUnique by tokenHash, updateMany, create, deleteMany).
     // Storage uses real sha256 — bcrypt is unsafe for refresh tokens because
     // it silently truncates inputs at 72 bytes, which conflated rotated JWTs
     // that share their first 72 bytes (header + start of payload).
@@ -420,31 +422,45 @@ describe('AuthService', () => {
       mockPrisma.refreshToken.findUnique.mockImplementation(
         async ({ where }: { where: { tokenHash: string } }) => {
           for (const row of rows.values()) {
-            if (row.tokenHash === where.tokenHash) return row;
+            if (row.tokenHash === where.tokenHash) return { ...row };
           }
           return null;
         },
       );
-      mockPrisma.refreshToken.delete.mockImplementation(
-        async ({ where }: { where: { id: string } }) => {
+      mockPrisma.refreshToken.updateMany.mockImplementation(
+        async ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: { rotatedAt: Date };
+        }) => {
           const row = rows.get(where.id);
-          rows.delete(where.id);
-          return row ?? {};
+          if (!row) return { count: 0 };
+          row.rotatedAt = data.rotatedAt;
+          return { count: 1 };
         },
       );
       mockPrisma.refreshToken.create.mockImplementation(
         async ({ data }: { data: { userId: string; tokenHash: string; expiresAt: Date } }) => {
           const id = `rt-${nextId++}`;
-          const row: Row = { id, ...data, createdAt: new Date() };
+          const row: Row = { id, ...data, createdAt: new Date(), rotatedAt: null };
           rows.set(id, row);
           return row;
         },
       );
       mockPrisma.refreshToken.deleteMany.mockImplementation(
-        async ({ where }: { where: { userId: string } }) => {
+        async ({
+          where,
+        }: {
+          where: { userId: string; rotatedAt?: { lt: Date } };
+        }) => {
           let count = 0;
           for (const [id, row] of [...rows.entries()]) {
-            if (row.userId === where.userId) {
+            const matchesRotation =
+              !where.rotatedAt ||
+              (row.rotatedAt != null && row.rotatedAt < where.rotatedAt.lt);
+            if (row.userId === where.userId && matchesRotation) {
               rows.delete(id);
               count++;
             }
@@ -480,37 +496,69 @@ describe('AuthService', () => {
       expect(result.refreshToken).toBe('refresh-token');
       // Rotation must run inside a transaction for atomicity.
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
-      expect(rows.size).toBe(1);
-      const remaining = [...rows.values()][0];
-      expect(remaining.tokenHash).toBe(sha256('refresh-token'));
-      expect(remaining.id).not.toBe('rt-1');
-      expect(mockPrisma.refreshToken.deleteMany).not.toHaveBeenCalled();
+      // The old row is marked rotated (kept for the grace window) and the
+      // new token is stored alongside it.
+      expect(rows.get('rt-1')?.rotatedAt).toBeInstanceOf(Date);
+      const fresh = [...rows.values()].find((r) => r.id !== 'rt-1');
+      expect(fresh?.tokenHash).toBe(sha256('refresh-token'));
+      // No session-wide revocation on a normal rotation.
+      expect(mockPrisma.refreshToken.deleteMany).not.toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
     });
 
-    it('should reject the same refresh token on a second use and revoke all tokens', async () => {
-      // Regression for "1st refresh succeeded, 2nd refresh with the same
-      // token also succeeded". The original implementation used bcrypt to
-      // hash refresh tokens; bcrypt truncates at 72 bytes, so two distinct
-      // JWTs for the same user (which share their first 72 bytes) collided,
-      // and the rotation path silently accepted the replay.
-      const future = new Date(Date.now() + 60_000);
+    it('should accept the same token again within the grace window (concurrent tabs)', async () => {
       const rows = installInMemoryRefreshTokenStore([
         {
           id: 'rt-1',
           userId: 'user-1',
           tokenHash: sha256('OLDTOKEN'),
-          expiresAt: future,
+          expiresAt: new Date(Date.now() + 60_000),
           createdAt: new Date(),
         },
       ]);
-      mockJwt.verify.mockReturnValue({ sub: 'user-1', email: 'john@example.com' });
+      // clearAllMocks keeps queued once-values from earlier tests; start clean.
+      mockJwt.signAsync
+        .mockReset()
+        .mockResolvedValueOnce('access-token')
+        .mockResolvedValueOnce('refresh-token')
+        .mockResolvedValueOnce('access-token-2')
+        .mockResolvedValueOnce('refresh-token-2');
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
         email: 'john@example.com',
       });
 
-      await service.refreshTokens('OLDTOKEN');
-      expect(rows.size).toBe(1);
+      const first = await service.refreshTokens('OLDTOKEN');
+      const second = await service.refreshTokens('OLDTOKEN');
+
+      expect(first.refreshToken).toBe('refresh-token');
+      expect(second.refreshToken).toBe('refresh-token-2');
+      // Both tabs end up with a live token; nothing was revoked.
+      const hashes = [...rows.values()].map((r) => r.tokenHash);
+      expect(hashes).toEqual(
+        expect.arrayContaining([sha256('refresh-token'), sha256('refresh-token-2')]),
+      );
+    });
+
+    it('should reject a rotated token reused after the grace window and revoke all tokens', async () => {
+      // Regression for "1st refresh succeeded, 2nd refresh with the same
+      // token also succeeded". The original implementation used bcrypt to
+      // hash refresh tokens; bcrypt truncates at 72 bytes, so two distinct
+      // JWTs for the same user (which share their first 72 bytes) collided,
+      // and the rotation path silently accepted the replay.
+      const rows = installInMemoryRefreshTokenStore([
+        {
+          id: 'rt-1',
+          userId: 'user-1',
+          tokenHash: sha256('OLDTOKEN'),
+          expiresAt: new Date(Date.now() + 60_000),
+          createdAt: new Date(),
+          // Rotated 11s ago — outside the 10s grace window.
+          rotatedAt: new Date(Date.now() - 11_000),
+        },
+      ]);
+      mockJwt.verify.mockReturnValue({ sub: 'user-1', email: 'john@example.com' });
 
       await expect(service.refreshTokens('OLDTOKEN')).rejects.toThrow(
         UnauthorizedException,
@@ -519,6 +567,29 @@ describe('AuthService', () => {
         where: { userId: 'user-1' },
       });
       expect(rows.size).toBe(0);
+    });
+
+    it('should return 401, not mint a token, when the row was revoked mid-refresh', async () => {
+      installInMemoryRefreshTokenStore([
+        {
+          id: 'rt-1',
+          userId: 'user-1',
+          tokenHash: sha256('OLDTOKEN'),
+          expiresAt: new Date(Date.now() + 60_000),
+          createdAt: new Date(),
+        },
+      ]);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'john@example.com',
+      });
+      // A concurrent logout deleted the row between lookup and rotation.
+      mockPrisma.refreshToken.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(service.refreshTokens('OLDTOKEN')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrisma.refreshToken.create).not.toHaveBeenCalled();
     });
 
     it('should sign each refresh token with a unique jti to prevent JWT collision', async () => {
