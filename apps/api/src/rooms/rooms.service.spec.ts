@@ -133,11 +133,11 @@ describe('RoomsService', () => {
   // ── joinRoom ────────────────────────────────────────────────────────────────
 
   describe('joinRoom', () => {
-    it('should upsert membership for the public-default General room', async () => {
+    it('should upsert membership for a room flagged as default', async () => {
       prisma.room.findUnique.mockResolvedValue({
         id: 'r1',
-        name: 'General',
         type: 'GROUP',
+        isDefault: true,
       });
       prisma.roomMember.upsert.mockResolvedValue({});
 
@@ -169,15 +169,25 @@ describe('RoomsService', () => {
       expect(prisma.roomMember.upsert).not.toHaveBeenCalled();
     });
 
-    it('should throw ForbiddenException for non-public channels (invite-only)', async () => {
+    it('should throw ForbiddenException for non-default channels (invite-only)', async () => {
       prisma.room.findUnique.mockResolvedValue({
         id: 'r1',
-        name: 'private-team',
         type: 'GROUP',
+        isDefault: false,
       });
 
       await expect(service.joinRoom('r1', 'u1')).rejects.toThrow(ForbiddenException);
       expect(prisma.roomMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it('should only read the isDefault flag, never the room name', async () => {
+      prisma.room.findUnique.mockResolvedValue({ id: 'r1', type: 'GROUP', isDefault: false });
+
+      await expect(service.joinRoom('r1', 'u1')).rejects.toThrow(ForbiddenException);
+      expect(prisma.room.findUnique).toHaveBeenCalledWith({
+        where: { id: 'r1' },
+        select: { id: true, type: true, isDefault: true },
+      });
     });
   });
 

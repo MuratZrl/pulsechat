@@ -3,10 +3,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 
-// Channels joinable through POST /rooms/:id/join without an invite. Every
-// other channel is invite-only; DMs are not joinable through this path at all.
-const PUBLIC_DEFAULTS = new Set(['General', 'Random']);
-
 @Injectable()
 export class RoomsService {
   constructor(
@@ -136,19 +132,19 @@ export class RoomsService {
   }
 
   // Channels are invite-only by default. The only ones joinable via this path
-  // are the seeded `General` / `Random` defaults; everything else routes
-  // through joinByInvite. DMs are 2-party by definition and are never joinable
+  // are the rooms flagged isDefault; everything else routes through
+  // joinByInvite. DMs are 2-party by definition and are never joinable
   // through this endpoint.
   async joinRoom(roomId: string, userId: string) {
     const room = await this.prisma.room.findUnique({
       where: { id: roomId },
-      select: { id: true, name: true, type: true },
+      select: { id: true, type: true, isDefault: true },
     });
     if (!room) throw new NotFoundException('Room not found');
     if (room.type === 'DM') {
       throw new ForbiddenException('Direct messages cannot be joined directly');
     }
-    if (!PUBLIC_DEFAULTS.has(room.name)) {
+    if (!room.isDefault) {
       throw new ForbiddenException('This room requires an invite to join');
     }
     await this.prisma.roomMember.upsert({

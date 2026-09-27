@@ -84,8 +84,8 @@ async function main() {
 
   const general = await prisma.room.upsert({
     where: { id: 'room-general' },
-    update: {},
-    create: { id: 'room-general', name: 'General', createdById: system.id },
+    update: { isDefault: true },
+    create: { id: 'room-general', name: 'General', createdById: system.id, isDefault: true },
   });
 
   const engineering = await prisma.room.upsert({
@@ -96,8 +96,8 @@ async function main() {
 
   const random = await prisma.room.upsert({
     where: { id: 'room-random' },
-    update: {},
-    create: { id: 'room-random', name: 'Random', createdById: system.id },
+    update: { isDefault: true },
+    create: { id: 'room-random', name: 'Random', createdById: system.id, isDefault: true },
   });
 
   // DM between Alex and Sarah

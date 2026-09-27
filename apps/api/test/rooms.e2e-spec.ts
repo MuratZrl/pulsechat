@@ -22,6 +22,7 @@ describe('Rooms authorization (e2e)', () => {
     type: 'GROUP' | 'DM';
     createdById: string;
     createdAt: Date;
+    isDefault: boolean;
   };
   type StoredMember = {
     userId: string;
@@ -81,6 +82,7 @@ describe('Rooms authorization (e2e)', () => {
             if (select.id) out.id = r.id;
             if (select.name) out.name = r.name;
             if (select.type) out.type = r.type;
+            if (select.isDefault) out.isDefault = r.isDefault;
             return out;
           }
           return r;
@@ -127,6 +129,7 @@ describe('Rooms authorization (e2e)', () => {
             type: data.type ?? 'GROUP',
             createdById: data.createdById,
             createdAt: new Date(),
+            isDefault: false,
           };
           rooms.set(id, room);
           if (data.members?.create) {
@@ -237,6 +240,7 @@ describe('Rooms authorization (e2e)', () => {
     type: 'GROUP' | 'DM',
     createdById: string,
     memberSpecs: { userId: string; role: string }[],
+    isDefault = false,
   ) => {
     rooms.set(id, {
       id,
@@ -244,6 +248,7 @@ describe('Rooms authorization (e2e)', () => {
       type,
       createdById,
       createdAt: new Date(),
+      isDefault,
     });
     for (const m of memberSpecs) {
       roomMembers.push({
@@ -266,10 +271,15 @@ describe('Rooms authorization (e2e)', () => {
     seedUser('user-B', 'Bob', 'b@example.com');
     seedUser('user-C', 'Carol', 'c@example.com');
 
-    // Seed `General` (joinable by anyone) — note we keep `Random` unused so
-    // the public-default carve-out is visible without making every test pass
-    // for the wrong reason.
-    seedRoom('room-general', 'General', 'GROUP', 'user-A', []);
+    // Seed the default `General` (joinable by anyone) — note we keep `Random`
+    // unused so the default carve-out is visible without making every test
+    // pass for the wrong reason.
+    seedRoom('room-general', 'General', 'GROUP', 'user-A', [], true);
+
+    // A user-created room that merely reuses the name — must stay invite-only.
+    seedRoom('room-fake-general', 'General', 'GROUP', 'user-A', [
+      { userId: 'user-A', role: 'admin' },
+    ]);
 
     // Private channel owned by A — B should be denied here.
     seedRoom('room-private', 'private-team', 'GROUP', 'user-A', [
@@ -382,6 +392,18 @@ describe('Rooms authorization (e2e)', () => {
       (m) => m.userId === 'user-B' && m.roomId === 'room-general',
     );
     expect(isMember).toBe(true);
+  });
+
+  it('requires an invite for a non-default room that is only named General', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/rooms/room-fake-general/join')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(403);
+    expect(res.body.message).toBe('This room requires an invite to join');
+    const isMember = roomMembers.some(
+      (m) => m.userId === 'user-B' && m.roomId === 'room-fake-general',
+    );
+    expect(isMember).toBe(false);
   });
 
   it('keeps the DM accessible to its members after the failed join', async () => {

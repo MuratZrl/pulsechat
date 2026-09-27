@@ -81,9 +81,10 @@ export class AuthService {
       throw err;
     }
 
-    // Auto-join default rooms
+    // Auto-join default rooms. Matched by flag, not by name — any user could
+    // create a room called "General" and have every new signup pushed into it.
     const defaultRooms = await this.prisma.room.findMany({
-      where: { name: { in: ['General', 'Random'] } },
+      where: { isDefault: true },
     });
     for (const room of defaultRooms) {
       await this.prisma.roomMember.upsert({

@@ -227,7 +227,7 @@ describe('AuthService', () => {
         select: { id: true, name: true, email: true, emailVerified: true },
       });
       expect(mockPrisma.room.findMany).toHaveBeenCalledWith({
-        where: { name: { in: ['General', 'Random'] } },
+        where: { isDefault: true },
       });
       expect(mockPrisma.roomMember.upsert).toHaveBeenCalledTimes(2);
       expect(mockJwt.signAsync).toHaveBeenCalledTimes(2);
