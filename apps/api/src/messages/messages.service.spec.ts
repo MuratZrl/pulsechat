@@ -106,6 +106,66 @@ describe('MessagesService', () => {
         service.sendMessage('r1', 'u1', { text: 'hello' }, 'Alice'),
       ).rejects.toThrow(ForbiddenException);
     });
+
+    it('should build a forward from the source message, ignoring client content', async () => {
+      prisma.roomMember.findUnique.mockResolvedValue({ userId: 'u1' });
+      prisma.message.findUnique.mockResolvedValue({
+        text: 'original text',
+        attachment: { name: 'a.png', type: 'image', size: '1 KB' },
+        isDeleted: false,
+        roomId: 'r-source',
+        sender: { name: 'Bob' },
+        room: { name: 'design', type: 'CHANNEL' },
+      });
+      prisma.message.create.mockResolvedValue(makeMessage());
+      prisma.user.findMany.mockResolvedValue([]);
+
+      await service.sendMessage(
+        'r1',
+        'u1',
+        { text: 'spoofed text', forwardFromMessageId: 'm-source' },
+        'Alice',
+      );
+
+      // Membership is checked for the target room and for the source room.
+      expect(prisma.roomMember.findUnique).toHaveBeenCalledWith({
+        where: { userId_roomId: { userId: 'u1', roomId: 'r-source' } },
+      });
+      expect(prisma.message.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            text: 'original text',
+            attachment: { name: 'a.png', type: 'image', size: '1 KB' },
+            forwarded: { originalSender: 'Bob', originalRoom: 'design' },
+          }),
+        }),
+      );
+    });
+
+    it('should refuse to forward from a room the caller is not in', async () => {
+      prisma.roomMember.findUnique.mockImplementation(
+        async ({ where }: { where: { userId_roomId: { roomId: string } } }) =>
+          where.userId_roomId.roomId === 'r1' ? { userId: 'u1' } : null,
+      );
+      prisma.message.findUnique.mockResolvedValue({
+        text: 'secret',
+        attachment: null,
+        isDeleted: false,
+        roomId: 'r-private',
+        sender: { name: 'Bob' },
+        room: { name: 'private', type: 'CHANNEL' },
+      });
+
+      await expect(
+        service.sendMessage(
+          'r1',
+          'u1',
+          { text: '', forwardFromMessageId: 'm-private' },
+          'Alice',
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.message.create).not.toHaveBeenCalled();
+    });
   });
 
   // ── editMessage ─────────────────────────────────────────────────────────────

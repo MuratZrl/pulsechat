@@ -2,6 +2,7 @@ import {
   IsString,
   IsOptional,
   IsIn,
+  IsNotEmpty,
   IsNumber,
   MaxLength,
   ValidateNested,
@@ -31,16 +32,6 @@ export class AttachmentDto {
   duration?: number;
 }
 
-export class ForwardedDto {
-  @IsString()
-  @MaxLength(50)
-  originalSender: string;
-
-  @IsString()
-  @MaxLength(50)
-  originalRoom: string;
-}
-
 export class CreateMessageDto {
   @IsString()
   @MaxLength(4000)
@@ -55,8 +46,13 @@ export class CreateMessageDto {
   @Type(() => AttachmentDto)
   attachment?: AttachmentDto;
 
+  // Forwarding names the source message; the server copies its content and
+  // fills the "forwarded from" label itself. Client-supplied forwarded
+  // metadata used to be stored verbatim, so any user could post a message
+  // labelled as forwarded from anyone.
   @IsOptional()
-  @ValidateNested()
-  @Type(() => ForwardedDto)
-  forwarded?: ForwardedDto;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  forwardFromMessageId?: string;
 }

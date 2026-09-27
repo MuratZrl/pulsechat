@@ -14,10 +14,13 @@ import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { IsString } from 'class-validator';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
 class ToggleReactionDto {
+  // Same cap as the socket toggle_reaction payload.
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(32)
   emoji: string;
 }
 

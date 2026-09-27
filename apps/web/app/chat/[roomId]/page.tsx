@@ -698,10 +698,13 @@ export default function ChatRoomPage({
   const handleForwardConfirm = useCallback(
     (targetRoomId: string, targetRoomName: string) => {
       if (!user || !forwardingMessage || !socket) return;
+      // The server copies text/attachment from the source message and fills
+      // the "forwarded from" label itself; text only satisfies the payload
+      // schema.
       socket.emit("send_message", {
         roomId: targetRoomId,
         text: forwardingMessage.text,
-        attachment: forwardingMessage.attachment,
+        forwardFromMessageId: forwardingMessage.id,
       });
       setForwardingMessage(null);
       showToast(`Message forwarded to #${targetRoomName}`, "success");

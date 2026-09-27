@@ -211,12 +211,52 @@ export class MessagesService {
     });
     if (!member) throw new ForbiddenException('Not a member of this room');
 
+    // Forwarding copies the source message instead of trusting client input:
+    // the caller must be able to read the source, and the "forwarded from"
+    // label is filled in here (client-supplied labels were spoofable).
+    let text = dto.text;
+    let attachment: object | undefined = dto.attachment;
+    let forwarded: { originalSender: string; originalRoom: string } | undefined;
+    if (dto.forwardFromMessageId) {
+      const source = await this.prisma.message.findUnique({
+        where: { id: dto.forwardFromMessageId },
+        select: {
+          text: true,
+          attachment: true,
+          isDeleted: true,
+          roomId: true,
+          sender: { select: { name: true } },
+          room: { select: { name: true, type: true } },
+        },
+      });
+      const canReadSource =
+        source &&
+        !source.isDeleted &&
+        (await this.prisma.roomMember.findUnique({
+          where: { userId_roomId: { userId, roomId: source.roomId } },
+        }));
+      // Same error whether the message is missing or in a room the caller
+      // isn't in, so ids can't be probed for existence.
+      if (!source || !canReadSource) {
+        throw new NotFoundException('Message to forward not found');
+      }
+      text = source.text;
+      attachment = (source.attachment as object | null) ?? undefined;
+      forwarded = {
+        originalSender: source.sender?.name ?? DELETED_USER_NAME,
+        // DM room names are internal user-id pairs; don't surface them.
+        originalRoom:
+          source.room.type === 'DM' ? 'direct message' : source.room.name,
+      };
+    }
+
     // Attachment URL whitelist. R2 stays as a prefix match (we mint those
     // keys ourselves so any URL under R2_PUBLIC_URL is by-construction trusted).
     // GIPHY URLs use a strict regex instead of a domain prefix so an attacker
     // can't smuggle arbitrary paths under media.giphy.com — only the exact
     // /media/[v1.{base64}/]{id}/giphy.gif shape the picker submits is allowed.
-    if (dto.attachment?.url) {
+    // A forward reuses an attachment that already passed this check.
+    if (!forwarded && dto.attachment?.url) {
       const url = dto.attachment.url;
       const r2PublicUrl = this.config.getOrThrow<string>('R2_PUBLIC_URL');
       const isR2 = url.startsWith(`${r2PublicUrl}/`);
@@ -231,7 +271,7 @@ export class MessagesService {
     // too generous for media payloads — every recipient's browser fetches
     // the GIF when the message renders, so a single sender can pile downstream
     // bandwidth on every member of the room.
-    if (dto.attachment) {
+    if (attachment) {
       await this.assertAttachmentRateLimit(userId);
     }
 
@@ -252,10 +292,10 @@ export class MessagesService {
       data: {
         roomId,
         senderId: userId,
-        text: dto.text,
+        text,
         replyToId: dto.replyToId ?? null,
-        attachment: dto.attachment ? (dto.attachment as object) : undefined,
-        forwarded: dto.forwarded ? (dto.forwarded as object) : undefined,
+        attachment,
+        forwarded,
       },
       include: this.messageInclude,
     });
@@ -273,7 +313,7 @@ export class MessagesService {
     // captured as "Te", "@alice" as "al" — so no @-mention ever resolved
     // and the Mention table stayed empty regardless of body content.
     const mentionPattern = /@(\w+(?:\s\w+)*)/g;
-    const matches = [...dto.text.matchAll(mentionPattern)];
+    const matches = [...text.matchAll(mentionPattern)];
 
     if (matches.length > 0) {
       const candidatesByMatch: string[][] = matches.map((m) => {

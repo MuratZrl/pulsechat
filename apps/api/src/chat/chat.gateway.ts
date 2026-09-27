@@ -16,9 +16,21 @@ import { MessagesService } from '../messages/messages.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RealtimeService } from '../realtime/realtime.service';
-import { CreateMessageDto } from '../messages/dto/create-message.dto';
 import { EditMessageDto } from '../messages/dto/edit-message.dto';
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  EditMessageEventDto,
+  MarkReadEventDto,
+  MessageEventDto,
+  RoomEventDto,
+  SendMessageEventDto,
+  ToggleReactionEventDto,
+} from './dto/socket-events.dto';
+import {
+  Injectable,
+  Logger,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 
 interface AuthSocket extends Socket {
@@ -35,6 +47,16 @@ interface AuthSocket extends Socket {
   namespace: '/',
 })
 @SkipThrottle()
+// app.useGlobalPipes() doesn't reach gateways, so socket payloads need their
+// own pipe. Unknown fields are rejected rather than stripped.
+@UsePipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: () => new WsException('Invalid payload'),
+  }),
+)
 export class ChatGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
 {
@@ -194,7 +216,7 @@ export class ChatGateway
   @SubscribeMessage('join_room')
   async handleJoinRoom(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: { roomId: string },
+    @MessageBody() data: RoomEventDto,
   ) {
     // Rate-limit before the DB lookup so a spammy client can't force a query
     // per emit.
@@ -209,7 +231,7 @@ export class ChatGateway
   @SubscribeMessage('leave_room')
   async handleLeaveRoom(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: { roomId: string },
+    @MessageBody() data: RoomEventDto,
   ) {
     // No assertMember: leaving must succeed even after the user was removed
     // from RoomMember (HTTP leaveRoom or kick) so the socket can still detach.
@@ -220,7 +242,7 @@ export class ChatGateway
   @SubscribeMessage('send_message')
   async handleSendMessage(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: CreateMessageDto & { roomId: string },
+    @MessageBody() data: SendMessageEventDto,
   ) {
     if (!(await this.checkRateLimit(client.userId, 'msg', 30))) {
       throw new WsException('Rate limit exceeded — slow down');
@@ -268,7 +290,7 @@ export class ChatGateway
   @SubscribeMessage('edit_message')
   async handleEditMessage(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: { messageId: string; text: string },
+    @MessageBody() data: EditMessageEventDto,
   ) {
     if (!(await this.checkRateLimit(client.userId, 'edit', 60))) {
       throw new WsException('Rate limit exceeded — slow down');
@@ -294,7 +316,7 @@ export class ChatGateway
   @SubscribeMessage('delete_message')
   async handleDeleteMessage(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: { messageId: string },
+    @MessageBody() data: MessageEventDto,
   ) {
     try {
       const deleted = await this.messagesService.deleteMessage(
@@ -313,7 +335,7 @@ export class ChatGateway
   @SubscribeMessage('toggle_reaction')
   async handleToggleReaction(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: { messageId: string; emoji: string },
+    @MessageBody() data: ToggleReactionEventDto,
   ) {
     if (!(await this.checkRateLimit(client.userId, 'reaction', 60))) {
       throw new WsException('Rate limit exceeded — slow down');
@@ -338,7 +360,7 @@ export class ChatGateway
   @SubscribeMessage('mark_read')
   async handleMarkRead(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: { messageId: string; roomId: string },
+    @MessageBody() data: MarkReadEventDto,
   ) {
     // Read receipts are best-effort UX — a fast scroll can legitimately trip
     // the limiter, so silently drop instead of throwing.
@@ -368,7 +390,7 @@ export class ChatGateway
   @SubscribeMessage('typing_start')
   async handleTypingStart(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: { roomId: string },
+    @MessageBody() data: RoomEventDto,
   ) {
     // Silent drop on limit — typing pings are noisy and non-critical.
     if (!(await this.checkRateLimit(client.userId, 'typing', 60))) return;
@@ -383,7 +405,7 @@ export class ChatGateway
   @SubscribeMessage('typing_stop')
   async handleTypingStop(
     @ConnectedSocket() client: AuthSocket,
-    @MessageBody() data: { roomId: string },
+    @MessageBody() data: RoomEventDto,
   ) {
     // No assertMember: typing_stop is a cleanup signal that must broadcast
     // even if the user was just kicked while typing.

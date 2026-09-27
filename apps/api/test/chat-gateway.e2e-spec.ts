@@ -357,6 +357,30 @@ describe('Chat gateway authorization (e2e)', () => {
     expect(got).toBeNull();
   });
 
+  it('rejects a send_message over the 4000-char cap the HTTP DTO enforces', async () => {
+    const created = mockPrisma.message.create.mock.calls.length;
+    const errPromise = onceWithin<{ message: string }>(sockA, 'exception', 2000);
+    sockA.emit('send_message', { roomId: 'room-R1', text: 'x'.repeat(4001) });
+    const err = await errPromise;
+    expect(err).not.toBeNull();
+    expect(err!.message).toBe('Invalid payload');
+    expect(mockPrisma.message.create.mock.calls.length).toBe(created);
+  });
+
+  it('rejects client-supplied forwarded metadata instead of storing it', async () => {
+    const created = mockPrisma.message.create.mock.calls.length;
+    const errPromise = onceWithin<{ message: string }>(sockA, 'exception', 2000);
+    sockA.emit('send_message', {
+      roomId: 'room-R1',
+      text: 'spoof',
+      forwarded: { originalSender: 'Anyone', originalRoom: 'anywhere' },
+    });
+    const err = await errPromise;
+    expect(err).not.toBeNull();
+    expect(err!.message).toBe('Invalid payload');
+    expect(mockPrisma.message.create.mock.calls.length).toBe(created);
+  });
+
   it('rejects mark_read from a non-member with WsException "Not a member of this room"', async () => {
     // Need a real message in R1 first — A sends one over the socket.
     const ack = await emitWithAck<{ success: boolean; message: { id: string } }>(
