@@ -5,10 +5,13 @@ import { Prisma } from '@prisma/client';
 import { MessagesService } from './messages.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { R2Service } from '../upload/r2.service';
 
 describe('MessagesService', () => {
   let service: MessagesService;
   let prisma: Record<string, Record<string, jest.Mock>>;
+  let redis: { incr: jest.Mock; expire: jest.Mock; get: jest.Mock };
+  let r2: { getAttachmentUrl: jest.Mock };
 
   const now = new Date('2025-06-01');
 
@@ -33,6 +36,12 @@ describe('MessagesService', () => {
   }
 
   beforeEach(async () => {
+    redis = {
+      incr: jest.fn().mockResolvedValue(1),
+      expire: jest.fn(),
+      get: jest.fn().mockResolvedValue(null),
+    };
+    r2 = { getAttachmentUrl: jest.fn() };
     prisma = {
       roomMember: {
         findUnique: jest.fn(),
@@ -68,13 +77,8 @@ describe('MessagesService', () => {
             getOrThrow: jest.fn().mockReturnValue('https://test-r2.example'),
           },
         },
-        {
-          provide: RedisService,
-          useValue: {
-            incr: jest.fn().mockResolvedValue(1),
-            expire: jest.fn(),
-          },
-        },
+        { provide: RedisService, useValue: redis },
+        { provide: R2Service, useValue: r2 },
       ],
     }).compile();
 
@@ -165,6 +169,85 @@ describe('MessagesService', () => {
         ),
       ).rejects.toThrow(NotFoundException);
       expect(prisma.message.create).not.toHaveBeenCalled();
+    });
+
+    it("should accept a private attachment key only from the user who uploaded it", async () => {
+      prisma.roomMember.findUnique.mockResolvedValue({ userId: 'u1' });
+      prisma.message.create.mockResolvedValue(makeMessage());
+      prisma.user.findMany.mockResolvedValue([]);
+      const attachment = {
+        name: 'a.png',
+        type: 'image' as const,
+        size: '1 KB',
+        key: 'attachments/abc.png',
+      };
+
+      redis.get.mockResolvedValue('someone-else');
+      await expect(
+        service.sendMessage('r1', 'u1', { text: '', attachment }, 'Alice'),
+      ).rejects.toThrow('Attachment upload not found or expired');
+      expect(prisma.message.create).not.toHaveBeenCalled();
+
+      redis.get.mockResolvedValue('u1');
+      await service.sendMessage('r1', 'u1', { text: '', attachment }, 'Alice');
+      expect(redis.get).toHaveBeenCalledWith('upload:attachments/abc.png');
+      expect(prisma.message.create).toHaveBeenCalled();
+    });
+  });
+
+  // ── getAttachmentUrl ────────────────────────────────────────────────────────
+
+  describe('getAttachmentUrl', () => {
+    it('should sign the private object for a room member', async () => {
+      prisma.message.findUnique.mockResolvedValue({
+        roomId: 'r1',
+        isDeleted: false,
+        attachment: { key: 'attachments/abc.png' },
+      });
+      prisma.roomMember.findUnique.mockResolvedValue({ userId: 'u1' });
+      r2.getAttachmentUrl.mockResolvedValue('https://signed.example/abc');
+
+      const result = await service.getAttachmentUrl('m1', 'u1');
+
+      expect(result).toEqual({ url: 'https://signed.example/abc', expiresIn: 300 });
+      expect(r2.getAttachmentUrl).toHaveBeenCalledWith('attachments/abc.png', 300);
+    });
+
+    it('should refuse non-members', async () => {
+      prisma.message.findUnique.mockResolvedValue({
+        roomId: 'r1',
+        isDeleted: false,
+        attachment: { key: 'attachments/abc.png' },
+      });
+      prisma.roomMember.findUnique.mockResolvedValue(null);
+
+      await expect(service.getAttachmentUrl('m1', 'u2')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(r2.getAttachmentUrl).not.toHaveBeenCalled();
+    });
+
+    it('should 404 for deleted messages and attachments without a private key', async () => {
+      prisma.roomMember.findUnique.mockResolvedValue({ userId: 'u1' });
+
+      prisma.message.findUnique.mockResolvedValue({
+        roomId: 'r1',
+        isDeleted: true,
+        attachment: { key: 'attachments/abc.png' },
+      });
+      await expect(service.getAttachmentUrl('m1', 'u1')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      prisma.message.findUnique.mockResolvedValue({
+        roomId: 'r1',
+        isDeleted: false,
+        attachment: { url: 'https://media1.giphy.com/media/x/giphy.gif' },
+      });
+      await expect(service.getAttachmentUrl('m1', 'u1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(r2.getAttachmentUrl).not.toHaveBeenCalled();
     });
   });
 

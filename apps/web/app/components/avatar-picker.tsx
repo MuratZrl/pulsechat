@@ -151,8 +151,9 @@ export function AvatarPicker({
       // Routed through apiClient so an expired access token gets a silent
       // /auth/refresh + retry instead of a hard 401. Previous raw fetch
       // bypassed that and failed the moment the token aged out (~15 min).
+      // Avatars keep a public URL (message attachments go through /upload).
       const data = await apiClient.upload<{ url: string }>(
-        "/upload",
+        "/upload/avatar",
         formData,
       );
       setSelectedCustomUrl(data.url);

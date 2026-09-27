@@ -348,7 +348,7 @@ export function MessageBubble({
 
         {/* Attachment — pass isOwn=false so styling stays uniform */}
         {message.attachment && message.attachment.type === "voice" ? (
-          <VoicePlayer attachment={message.attachment} isOwn={false} />
+          <VoicePlayer attachment={message.attachment} isOwn={false} messageId={message.id} />
         ) : message.attachment && message.attachment.size === "GIF" ? (
           message.attachment.url?.startsWith("http") ? (
             // Real GIF (GIPHY) — render as an image. `block` is load-bearing:
@@ -381,7 +381,7 @@ export function MessageBubble({
             </div>
           )
         ) : message.attachment ? (
-          <AttachmentCard attachment={message.attachment} isOwn={false} />
+          <AttachmentCard attachment={message.attachment} isOwn={false} messageId={message.id} />
         ) : null}
 
         {/* Link preview */}

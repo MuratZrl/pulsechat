@@ -4,6 +4,7 @@ import {
   IsIn,
   IsNotEmpty,
   IsNumber,
+  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -22,10 +23,19 @@ export class AttachmentDto {
   @MaxLength(20)
   size: string;
 
+  // GIPHY GIFs and attachments uploaded before storage went private.
   @IsOptional()
   @IsString()
   @MaxLength(2048)
   url?: string;
+
+  // Private upload from POST /upload; read back through the signed URL at
+  // GET /messages/:id/attachment.
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  @Matches(/^attachments\/[A-Za-z0-9._-]+$/)
+  key?: string;
 
   @IsOptional()
   @IsNumber()

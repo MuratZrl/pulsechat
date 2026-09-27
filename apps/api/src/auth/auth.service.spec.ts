@@ -134,6 +134,7 @@ describe('AuthService', () => {
       url.startsWith(R2_PREFIX) ? url.slice(R2_PREFIX.length) : null,
     ),
     deleteObjects: jest.fn(),
+    deleteAttachments: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -991,6 +992,7 @@ describe('AuthService', () => {
       mockPrisma.message.findFirst.mockResolvedValue(null);
       mockPrisma.user.findFirst.mockResolvedValue(null);
       mockR2.deleteObjects.mockResolvedValue(undefined);
+      mockR2.deleteAttachments.mockResolvedValue(undefined);
     });
 
     it('should delete the account and revoke refresh tokens in one transaction', async () => {
@@ -1030,11 +1032,16 @@ describe('AuthService', () => {
         { attachment: { url: `${R2_PREFIX}own.png` } },
         { attachment: { url: `${R2_PREFIX}shared.png` } },
         { attachment: { url: 'https://media1.giphy.com/media/abc/giphy.gif' } },
+        { attachment: { key: 'attachments/own-private.png' } },
+        { attachment: { key: 'attachments/forwarded-private.png' } },
       ]);
-      // Another user's message still references shared.png (a forward).
+      // Other users' messages still reference shared.png and
+      // forwarded-private.png (forwards), so those objects must survive.
       mockPrisma.message.findFirst.mockImplementation(
         async ({ where }: { where: { attachment: { equals: string } } }) =>
-          where.attachment.equals === `${R2_PREFIX}shared.png`
+          [`${R2_PREFIX}shared.png`, 'attachments/forwarded-private.png'].includes(
+            where.attachment.equals,
+          )
             ? { id: 'other-msg' }
             : null,
       );
@@ -1044,6 +1051,9 @@ describe('AuthService', () => {
       expect(mockR2.deleteObjects).toHaveBeenCalledWith([
         'own.png',
         'avatar.png',
+      ]);
+      expect(mockR2.deleteAttachments).toHaveBeenCalledWith([
+        'attachments/own-private.png',
       ]);
     });
 

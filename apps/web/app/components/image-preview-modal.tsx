@@ -5,9 +5,6 @@ import { Modal } from "./modal";
 import { Attachment } from "../types";
 import { apiClient } from "../lib/api-client";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
-const SERVER_ORIGIN = API_BASE.replace(/\/api$/, "");
-
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
@@ -39,13 +36,13 @@ export function ImagePreviewModal({
       const formData = new FormData();
       formData.append("file", file);
 
-      // Upload to R2 first, then emit the message with the returned URL.
+      // Upload to R2 first, then emit the message with the returned key.
       // Sending the FileReader data: URL straight through send_message used
       // to fail server-side (BadRequest: not from an allowed source) while
       // the modal closed anyway, so the UI looked successful but nothing
       // landed. Mirrors the attachment-picker upload flow.
       const data = await apiClient.upload<{
-        url: string;
+        key: string;
         name: string;
         size: string;
         type: "image" | "file" | "voice";
@@ -55,9 +52,7 @@ export function ImagePreviewModal({
         name: data.name,
         type: data.type,
         size: data.size,
-        url: data.url.startsWith("http")
-          ? data.url
-          : `${SERVER_ORIGIN}${data.url}`,
+        key: data.key,
       };
       onSend(attachment);
     } catch (err) {

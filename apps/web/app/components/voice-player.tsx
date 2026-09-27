@@ -2,13 +2,16 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Attachment } from "../types";
+import { getAttachmentUrl } from "../lib/attachment-url";
 
 interface VoicePlayerProps {
   attachment: Attachment;
   isOwn: boolean;
+  // Needed to request a signed URL for private (key-only) recordings.
+  messageId?: string;
 }
 
-export function VoicePlayer({ attachment, isOwn }: VoicePlayerProps) {
+export function VoicePlayer({ attachment, isOwn, messageId }: VoicePlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -21,16 +24,23 @@ export function VoicePlayer({ attachment, isOwn }: VoicePlayerProps) {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  const togglePlay = useCallback(() => {
+  const togglePlay = useCallback(async () => {
     if (isPlaying) {
       audioRef.current?.pause();
       if (intervalRef.current) clearInterval(intervalRef.current);
       setIsPlaying(false);
     } else {
-      // Try real playback
-      if (attachment.url && !attachment.url.startsWith("mock-")) {
+      // Try real playback. Private recordings resolve a signed URL at play
+      // time, so a page left open past the URL's expiry still plays.
+      const src =
+        attachment.url && !attachment.url.startsWith("mock-")
+          ? attachment.url
+          : attachment.key && messageId
+            ? await getAttachmentUrl(messageId)
+            : null;
+      if (src) {
         if (!audioRef.current) {
-          audioRef.current = new Audio(attachment.url);
+          audioRef.current = new Audio(src);
           audioRef.current.onended = () => {
             setIsPlaying(false);
             setProgress(0);
@@ -55,7 +65,7 @@ export function VoicePlayer({ attachment, isOwn }: VoicePlayerProps) {
         });
       }, 1000);
     }
-  }, [isPlaying, attachment.url, duration]);
+  }, [isPlaying, attachment.url, attachment.key, messageId, duration]);
 
   useEffect(() => {
     return () => {

@@ -4,9 +4,6 @@ import { useRef, useEffect, useState } from "react";
 import { Attachment } from "../types";
 import { apiClient } from "../lib/api-client";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api";
-const SERVER_ORIGIN = API_BASE.replace(/\/api$/, "");
-
 interface AttachmentPickerProps {
   onSelect: (attachment: Attachment) => void;
   onClose: () => void;
@@ -41,8 +38,10 @@ export function AttachmentPicker({ onSelect, onClose }: AttachmentPickerProps) {
 
       // Routed through apiClient for 401 auto-refresh — see avatar-picker
       // for the same pattern and rationale.
+      // Attachments are stored privately; the message carries the key and
+      // readers get a signed URL for it.
       const data = await apiClient.upload<{
-        url: string;
+        key: string;
         name: string;
         size: string;
         type: "image" | "file" | "voice";
@@ -52,7 +51,7 @@ export function AttachmentPicker({ onSelect, onClose }: AttachmentPickerProps) {
         name: data.name,
         type: data.type,
         size: data.size,
-        url: data.url.startsWith("http") ? data.url : `${SERVER_ORIGIN}${data.url}`,
+        key: data.key,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");

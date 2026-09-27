@@ -36,7 +36,10 @@ export interface Attachment {
   name: string;
   type: "image" | "file" | "voice";
   size: string;
+  // Public URL: GIPHY GIFs and files uploaded before storage went private.
   url?: string;
+  // Private upload; displayed through a signed URL (see lib/attachment-url).
+  key?: string;
   duration?: number;
 }
 

@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { R2Service } from '../upload/r2.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 
@@ -29,12 +30,17 @@ const ATTACHMENT_RATE_WINDOW_SECONDS = 60;
 // NULL on user deletion, the tombstone row itself is kept).
 const DELETED_USER_NAME = 'Deleted user';
 
+// Lifetime of a signed attachment URL. Short, since anyone holding the URL
+// can fetch the file until it expires.
+const ATTACHMENT_URL_TTL_SECONDS = 300;
+
 @Injectable()
 export class MessagesService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
     private redis: RedisService,
+    private r2: R2Service,
   ) {}
 
   private buildReactionMap(
@@ -256,6 +262,18 @@ export class MessagesService {
     // can't smuggle arbitrary paths under media.giphy.com — only the exact
     // /media/[v1.{base64}/]{id}/giphy.gif shape the picker submits is allowed.
     // A forward reuses an attachment that already passed this check.
+    if (!forwarded && dto.attachment?.key) {
+      // Private uploads are claimed by key. Keys are visible in signed URLs,
+      // so only the uploader may attach one — otherwise anyone who once saw
+      // a file could re-post its key into a room of theirs and read it there.
+      if (dto.attachment.url) {
+        throw new BadRequestException('Attachment cannot have both a key and a URL');
+      }
+      const uploader = await this.redis.get(`upload:${dto.attachment.key}`);
+      if (uploader !== userId) {
+        throw new BadRequestException('Attachment upload not found or expired');
+      }
+    }
     if (!forwarded && dto.attachment?.url) {
       const url = dto.attachment.url;
       const r2PublicUrl = this.config.getOrThrow<string>('R2_PUBLIC_URL');
@@ -538,6 +556,34 @@ export class MessagesService {
       });
     }
     return result;
+  }
+
+  /**
+   * Short-lived signed URL for a private attachment, only for members of the
+   * message's room. Deleted messages and legacy/GIPHY attachments (which
+   * carry a public `url`) have no private object to sign.
+   */
+  async getAttachmentUrl(messageId: string, userId: string) {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { roomId: true, isDeleted: true, attachment: true },
+    });
+    if (!message || message.isDeleted) {
+      throw new NotFoundException('Attachment not found');
+    }
+
+    const member = await this.prisma.roomMember.findUnique({
+      where: { userId_roomId: { userId, roomId: message.roomId } },
+    });
+    if (!member) throw new ForbiddenException('Not a member of this room');
+
+    const key = (message.attachment as { key?: unknown } | null)?.key;
+    if (typeof key !== 'string') {
+      throw new NotFoundException('Attachment not found');
+    }
+
+    const url = await this.r2.getAttachmentUrl(key, ATTACHMENT_URL_TTL_SECONDS);
+    return { url, expiresIn: ATTACHMENT_URL_TTL_SECONDS };
   }
 
   async searchMessages(roomId: string, userId: string, query: string, limit = 20) {

@@ -14,6 +14,7 @@ import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Throttle } from '@nestjs/throttler';
 import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
 class ToggleReactionDto {
@@ -93,6 +94,17 @@ export class MessagesController {
     @Param('id') id: string,
   ) {
     return this.messagesService.deleteMessage(id, req.user.id);
+  }
+
+  // One request per rendered private attachment, so a room full of images
+  // gets a higher budget than the global default.
+  @Get('messages/:id/attachment')
+  @Throttle({ default: { limit: 300, ttl: 60000 } })
+  getAttachmentUrl(
+    @Request() req: { user: { id: string } },
+    @Param('id') id: string,
+  ) {
+    return this.messagesService.getAttachmentUrl(id, req.user.id);
   }
 
   @Post('messages/:id/reactions')

@@ -363,7 +363,7 @@ export class AuthService {
     if (!valid) throw new BadRequestException('Incorrect password');
 
     // Resolve the account's uploads before its messages are blanked below.
-    const uploadKeys = await this.findOwnedUploadKeys(userId, user.avatarUrl);
+    const uploads = await this.findOwnedUploadKeys(userId, user.avatarUrl);
 
     // One transaction, so a failure can't leave a half-deleted account (the
     // old sequence blanked every message, then hit a FK error on delete).
@@ -386,7 +386,10 @@ export class AuthService {
     // Storage cleanup runs after the commit and is best effort: the account
     // is already gone, so a storage error is logged, not returned.
     try {
-      await this.r2.deleteObjects(uploadKeys);
+      await Promise.all([
+        this.r2.deleteObjects(uploads.publicKeys),
+        this.r2.deleteAttachments(uploads.attachmentKeys),
+      ]);
     } catch (err) {
       this.logger.error(`Failed to delete uploads of deleted user ${userId}`, err);
     }
@@ -395,27 +398,30 @@ export class AuthService {
   }
 
   /**
-   * R2 keys of files this user uploaded: their avatar and the attachments on
-   * their messages. Uploads aren't recorded per user, so ownership is
-   * inferred from references — an object another user also references (a
-   * forwarded copy, or the same avatar URL) is left in place.
+   * R2 keys of files this user uploaded: their avatar, public attachments
+   * from before storage went private (by URL), and private attachments (by
+   * key). Uploads aren't recorded per user, so ownership is inferred from
+   * references — an object another user also references (a forwarded copy,
+   * or the same avatar URL) is left in place.
    */
   private async findOwnedUploadKeys(
     userId: string,
     avatarUrl: string | null,
-  ): Promise<string[]> {
+  ): Promise<{ publicKeys: string[]; attachmentKeys: string[] }> {
     const messages = await this.prisma.message.findMany({
       where: { senderId: userId, attachment: { not: Prisma.DbNull } },
       select: { attachment: true },
     });
     const urls = new Set<string>();
+    const privateKeys = new Set<string>();
     for (const { attachment } of messages) {
-      const url = (attachment as { url?: unknown } | null)?.url;
+      const { url, key } = (attachment ?? {}) as { url?: unknown; key?: unknown };
       if (typeof url === 'string') urls.add(url);
+      if (typeof key === 'string') privateKeys.add(key);
     }
     if (avatarUrl) urls.add(avatarUrl);
 
-    const keys: string[] = [];
+    const publicKeys: string[] = [];
     for (const url of urls) {
       const key = this.r2.keyFromPublicUrl(url);
       if (!key) continue; // GIPHY or anything our upload endpoint didn't mint
@@ -432,9 +438,22 @@ export class AuthService {
           select: { id: true },
         }),
       ]);
-      if (!otherMessage && !otherAvatar) keys.push(key);
+      if (!otherMessage && !otherAvatar) publicKeys.push(key);
     }
-    return keys;
+
+    const attachmentKeys: string[] = [];
+    for (const key of privateKeys) {
+      const otherMessage = await this.prisma.message.findFirst({
+        where: {
+          senderId: { not: userId },
+          attachment: { path: ['key'], equals: key },
+        },
+        select: { id: true },
+      });
+      if (!otherMessage) attachmentKeys.push(key);
+    }
+
+    return { publicKeys, attachmentKeys };
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

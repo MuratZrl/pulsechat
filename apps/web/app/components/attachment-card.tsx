@@ -1,19 +1,31 @@
+"use client";
+
 import { Attachment } from "../types";
+import { useAttachmentUrl } from "../lib/attachment-url";
 
 interface AttachmentCardProps {
   attachment: Attachment;
   isOwn: boolean;
+  // Needed to request a signed URL for private (key-only) attachments.
+  messageId?: string;
 }
 
-export function AttachmentCard({ attachment, isOwn }: AttachmentCardProps) {
-  if (attachment.type === "image" && attachment.url) {
+export function AttachmentCard({ attachment, isOwn, messageId }: AttachmentCardProps) {
+  const src = useAttachmentUrl(messageId, attachment);
+
+  if (attachment.type === "image" && (attachment.url || attachment.key)) {
     return (
       <div className="mt-1 overflow-hidden rounded-md">
-        <img
-          src={attachment.url}
-          alt={attachment.name}
-          className="h-auto max-w-[200px] rounded-md"
-        />
+        {src ? (
+          <img
+            src={src}
+            alt={attachment.name}
+            className="h-auto max-w-[200px] rounded-md"
+          />
+        ) : (
+          // Placeholder while the signed URL is fetched.
+          <div className="h-24 w-[200px] animate-pulse rounded-md bg-hover" />
+        )}
         <p className={`mt-0.5 text-[10px] ${isOwn ? "text-indigo-200" : "text-text-secondary"}`}>
           {attachment.name} &middot; {attachment.size}
         </p>
