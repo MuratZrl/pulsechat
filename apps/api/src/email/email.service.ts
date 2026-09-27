@@ -53,8 +53,9 @@ export class EmailService {
       });
       this.logger.log(`Password reset email sent to ${to}`);
     } catch (error) {
+      // Logged, not rethrown: an SMTP failure must never reach the client
+      // (it used to surface as a 500 only for registered addresses).
       this.logger.error(`Failed to send password reset email to ${to}`, error);
-      throw error;
     }
   }
 
@@ -79,8 +80,8 @@ export class EmailService {
       });
       this.logger.log(`Verification email sent to ${to}`);
     } catch (error) {
+      // Logged, not rethrown — see sendPasswordResetEmail.
       this.logger.error(`Failed to send verification email to ${to}`, error);
-      throw error;
     }
   }
 }

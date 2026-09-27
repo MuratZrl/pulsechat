@@ -12,6 +12,8 @@ import { createHash } from 'crypto';
 import { AuthService } from './auth.service';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+// Email sends are fire-and-forget after the response; let them run.
+const flushBackground = () => new Promise((resolve) => setImmediate(resolve));
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { EmailService } from '../email/email.service';
@@ -722,6 +724,7 @@ describe('AuthService', () => {
       mockEmail.sendPasswordResetEmail.mockResolvedValue(undefined);
 
       const result = await service.forgotPassword('john@example.com');
+      await flushBackground();
 
       expect(result).toEqual({
         message: 'If that email exists, a reset link has been sent',
@@ -735,6 +738,26 @@ describe('AuthService', () => {
         'john@example.com',
         'mock-random-token',
       );
+    });
+
+    it('should respond before the email goes out and survive an SMTP failure', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      mockRedis.set.mockResolvedValue('OK');
+      let releaseSmtp!: () => void;
+      mockEmail.sendPasswordResetEmail.mockReturnValue(
+        new Promise<void>((_, reject) => {
+          releaseSmtp = () => reject(new Error('SMTP down'));
+        }),
+      );
+
+      // Resolves while the SMTP call is still pending.
+      const result = await service.forgotPassword('john@example.com');
+      expect(result).toEqual({
+        message: 'If that email exists, a reset link has been sent',
+      });
+
+      releaseSmtp();
+      await flushBackground();
     });
 
     it('should return success even when user does not exist (prevents enumeration)', async () => {
@@ -835,8 +858,11 @@ describe('AuthService', () => {
       mockEmail.sendVerificationEmail.mockResolvedValue(undefined);
 
       const result = await service.resendVerification('user-1');
+      await flushBackground();
 
-      expect(result).toEqual({ message: 'Verification email sent' });
+      expect(result).toEqual({
+        message: 'If your email still needs verifying, a new link is on its way',
+      });
       expect(mockRedis.set).toHaveBeenCalledWith(
         'verify:mock-random-token',
         'user-1',
@@ -871,16 +897,16 @@ describe('AuthService', () => {
       );
     });
 
-    it('should throw BadRequestException if email is already verified', async () => {
+    it('should answer the same way for an already verified email, without sending', async () => {
       const verifiedUser = { ...mockUser, emailVerified: true };
       mockPrisma.user.findUnique.mockResolvedValue(verifiedUser);
 
-      await expect(service.resendVerification('user-1')).rejects.toThrow(
-        BadRequestException,
-      );
-      await expect(service.resendVerification('user-1')).rejects.toThrow(
-        'Email is already verified',
-      );
+      const result = await service.resendVerification('user-1');
+      await flushBackground();
+
+      expect(result).toEqual({
+        message: 'If your email still needs verifying, a new link is on its way',
+      });
       expect(mockRedis.set).not.toHaveBeenCalled();
       expect(mockEmail.sendVerificationEmail).not.toHaveBeenCalled();
     });

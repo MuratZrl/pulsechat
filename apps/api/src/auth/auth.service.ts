@@ -233,15 +233,18 @@ export class AuthService {
   async forgotPassword(emailAddr: string) {
     const user = await this.prisma.user.findUnique({
       where: { email: emailAddr },
+      select: { id: true },
     });
 
-    // Always return success to prevent email enumeration
-    if (!user) return { message: 'If that email exists, a reset link has been sent' };
-
-    const token = crypto.randomBytes(32).toString('hex');
-    await this.redis.set(`reset:${token}`, user.id, 3600); // 1 hour TTL
-
-    await this.email.sendPasswordResetEmail(emailAddr, token);
+    // Same response in about the same time whether or not the account
+    // exists: the token write and SMTP send run after we respond. Awaiting
+    // them used to make known addresses measurably slower, and an SMTP
+    // failure turned into a 500 only for them.
+    if (user) {
+      this.sendPasswordReset(user.id, emailAddr).catch((err) =>
+        this.logger.error('Failed to send password reset email', err),
+      );
+    }
 
     return { message: 'If that email exists, a reset link has been sent' };
   }
@@ -296,11 +299,16 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();
-    if (user.emailVerified) throw new BadRequestException('Email is already verified');
 
-    await this.sendVerificationToken(user.id, user.email);
+    // One response whatever the account's state, sent before the SMTP round
+    // trip so its latency or failure never reaches the client.
+    if (!user.emailVerified) {
+      this.sendVerificationToken(user.id, user.email).catch((err) =>
+        this.logger.error('Failed to send verification email', err),
+      );
+    }
 
-    return { message: 'Verification email sent' };
+    return { message: 'If your email still needs verifying, a new link is on its way' };
   }
 
   // ── Delete Account ──────────────────────────────────────────────────────────
@@ -388,6 +396,12 @@ export class AuthService {
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  private async sendPasswordReset(userId: string, emailAddr: string) {
+    const token = crypto.randomBytes(32).toString('hex');
+    await this.redis.set(`reset:${token}`, userId, 3600); // 1 hour TTL
+    await this.email.sendPasswordResetEmail(emailAddr, token);
+  }
 
   private async sendVerificationToken(userId: string, emailAddr: string) {
     const token = crypto.randomBytes(32).toString('hex');
